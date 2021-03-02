@@ -14,6 +14,9 @@ func init() {
 	assetRegexp = regexp.MustCompile(`\.(jpe?g|png|gif|webp|tiff?|pdf|css|js|woff2?|ttf|eot|svg|ttc)\b`)
 }
 
+// Requests contains all HTTP requests for a given time.
+// The requests are divied by their type: app and other (assets)
+// Requests notifies its parent of changes through updateChan
 type Requests struct {
 	app                *rolling.TimePolicy
 	other              *rolling.TimePolicy
@@ -26,6 +29,8 @@ type Requests struct {
 	ctx                context.Context
 }
 
+// NewRequests creates a new Requests item.
+// The app context and configuration get passed into the new item
 func NewRequests(ctx context.Context, config *Config, updateChan chan IPStats) *Requests {
 	return &Requests{
 		config:             config,
@@ -40,18 +45,22 @@ func NewRequests(ctx context.Context, config *Config, updateChan chan IPStats) *
 	}
 }
 
+// Total returns the total number of requests
 func (r *Requests) Total() int {
 	return int(r.all.Reduce(rolling.Count))
 }
 
+// App returns the number of all application requests
 func (r *Requests) App() int {
 	return int(r.app.Reduce(rolling.Count))
 }
 
+// Other returns the number of all non-app requests
 func (r *Requests) Other() int {
 	return int(r.other.Reduce(rolling.Count))
 }
 
+// Add adds a request
 func (r *Requests) Add(req *Request) {
 	if r.updateChanIsClosed {
 		return
@@ -84,14 +93,16 @@ func (r *Requests) Add(req *Request) {
 		Total: int(total),
 		App:   int(app),
 		Other: int(other),
-		Ratio: total / app,
+		Ratio: app / total,
 	}
 }
 
+// Ratio returns the ratio of app requests / total requests
 func (r *Requests) Ratio() float64 {
 	return r.all.Reduce(rolling.Count) / r.app.Reduce(rolling.Count)
 }
 
+// ByTimeWindow returns an array of counts by each time window
 func (r *Requests) ByTimeWindow() []int {
 	var data []int
 

@@ -27,5 +27,6 @@ type KVStore interface {
 	Set(namespace, key, value []byte) error
 	Has(namespace, key []byte) (bool, error)
 	All(namespace, prefix []byte) ([][]byte, error)
+	ErrNotFound() error
 	Close() error
 }

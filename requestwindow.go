@@ -7,6 +7,9 @@ import (
 	"time"
 )
 
+// RequestsWindow contains the most recent requests
+// The number of requests is limited by a maximum number of requests the list may contain (maxSize) and
+// ttl, the time requests stay in the list before they expire and are removed
 type RequestsWindow struct {
 	data    *list.List
 	maxSize int
@@ -15,6 +18,8 @@ type RequestsWindow struct {
 	ctx     context.Context
 }
 
+// NewRequestsWindow creates a new RequestsWindow.
+// The app context and configuration get passed into the new item
 func NewRequestsWindow(ctx context.Context, config *Config) *RequestsWindow {
 	rw := RequestsWindow{
 		data:    list.New(),
@@ -29,6 +34,7 @@ func NewRequestsWindow(ctx context.Context, config *Config) *RequestsWindow {
 	return &rw
 }
 
+// Add adds a single request
 func (rw *RequestsWindow) Add(r *Request) {
 	rw.mutex.Lock()
 	defer rw.mutex.Unlock()
@@ -39,7 +45,8 @@ func (rw *RequestsWindow) Add(r *Request) {
 	}
 }
 
-func (rw RequestsWindow) Requests() []*Request {
+// Requests returns an array of all requests in the list
+func (rw *RequestsWindow) Requests() []*Request {
 	rw.mutex.Lock()
 	defer rw.mutex.Unlock()
 	reqs := make([]*Request, rw.data.Len())

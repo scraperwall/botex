@@ -6,6 +6,7 @@ import (
 	"time"
 
 	badger "github.com/dgraph-io/badger/v3"
+	"github.com/kr/pretty"
 	log "github.com/sirupsen/logrus"
 )
 
@@ -40,14 +41,18 @@ func NewBadgerDB(ctx context.Context, dataDir string) (KVStore, error) {
 // Get implements the DB interface. It attempts to get a value for a given key
 // and namespace. If the key does not exist in the provided namespace, an error
 // is returned, otherwise the retrieved value.
-func (bdb *BadgerDB) Get(namespace, key []byte) (value []byte, err error) {
+func (bdb *BadgerDB) Get(namespace, key []byte) ([]byte, error) {
+	var value []byte
+	var err error
+
 	err = bdb.db.View(func(txn *badger.Txn) error {
-		item, err2 := txn.Get([]byte(key))
+		item, err2 := txn.Get(bdb.badgerNamespaceKey(namespace, key))
 		if err2 != nil {
 			return err2
 		}
 
 		return item.Value(func(data []byte) error {
+			value = make([]byte, len(data))
 			copy(value, data)
 			return nil
 		})
@@ -78,11 +83,12 @@ func (bdb *BadgerDB) Set(namespace, key, value []byte) error {
 // If the key/value pair can't be saved an error is returned
 func (bdb *BadgerDB) SetEx(namespace, key, value []byte, ttl time.Duration) error {
 	err := bdb.db.Update(func(txn *badger.Txn) error {
-		e := badger.NewEntry(key, value).WithTTL(ttl)
+		e := badger.NewEntry(bdb.badgerNamespaceKey(namespace, key), value).WithTTL(ttl)
 		return txn.SetEntry(e)
 	})
 
 	if err != nil {
+		log.Info(err)
 		return err
 	}
 
@@ -133,6 +139,7 @@ func (bdb *BadgerDB) runGC() {
 	}
 }
 
+// All returns all values for the given namespace and prefix.
 func (bdb *BadgerDB) All(namespace, prefix []byte) ([][]byte, error) {
 	res := make([][]byte, 0)
 
@@ -142,6 +149,7 @@ func (bdb *BadgerDB) All(namespace, prefix []byte) ([][]byte, error) {
 		prefix := bdb.badgerNamespaceKey(namespace, prefix)
 		for it.Seek(prefix); it.ValidForPrefix(prefix); it.Next() {
 			item := it.Item()
+			pretty.Println(item)
 			err := item.Value(func(v []byte) error {
 				data := make([]byte, 0)
 				copy(data, v)
@@ -160,6 +168,11 @@ func (bdb *BadgerDB) All(namespace, prefix []byte) ([][]byte, error) {
 	}
 
 	return res, nil
+}
+
+// ErrNotFound is the error badger returns when it can't find a key in the database
+func (bdb *BadgerDB) ErrNotFound() error {
+	return badger.ErrKeyNotFound
 }
 
 // badgerNamespaceKey returns a composite key used for lookup and storage for a

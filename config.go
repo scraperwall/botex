@@ -5,10 +5,12 @@ import (
 
 	natsd "github.com/nats-io/nats-server/v2/server"
 	"github.com/nats-io/nats.go"
-	"github.com/scraperwall/asndb"
-	"github.com/scraperwall/geoip"
+	"github.com/scraperwall/asndb/v2"
+	"github.com/scraperwall/geoip/v2"
 )
 
+// Config contains all configurable bits and pieces the botex application needs
+// The configuration gets passed on to all parts of the application that need to access it
 type Config struct {
 	WindowSize      time.Duration
 	NumWindows      int
@@ -19,15 +21,20 @@ type Config struct {
 	NatsHTTPPort    int
 	NatsUser        string
 	NatsPassword    string
-	StaticBaseURL   string
+	GeoIPDBFile     string
+	ASNDBFile       string
 	KeepRequests    int
 	ResolverWorkers int
 	ResolverTries   int
 	ResolverTTL     time.Duration
 	LogLevel        int
+	BlockTTL        time.Duration
+	MaxRatio        float64
+	MinAppRequests  int
+	MaxAppRequests  int
 
-	ASNDB      *asndb.ASNDB
-	GEOIPDB    *geoip.GeoIP
+	ASNDB      *asndb.DB
+	GEOIPDB    *geoip.DB
 	NatsServer *natsd.Server
 	NatsConn   *nats.Conn
 	KVStore    KVStore

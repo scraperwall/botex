@@ -10,16 +10,14 @@ import (
 	badger "github.com/dgraph-io/badger/v3"
 	natsd "github.com/nats-io/nats-server/v2/server"
 	nats "github.com/nats-io/nats.go"
-	"github.com/scraperwall/asndb"
-	"github.com/scraperwall/geoip"
+	"github.com/scraperwall/asndb/v2"
+	"github.com/scraperwall/geoip/v2"
 	log "github.com/sirupsen/logrus"
 )
 
 // Botex detects bad bots
 type Botex struct {
 	natsSubscriptions []*nats.Subscription
-	asnDB             *asndb.ASNDB
-	geoipDB           *geoip.GeoIP
 	resolver          *Resolver
 	history           *History
 	blocklist         *Blocklist
@@ -40,9 +38,10 @@ func (b *Botex) HandleRequest(r *Request) {
 	// TODO: is the URL or Host whitelisted?
 
 	r.Time = time.Unix(r.Timestamp, 0)
-	b.history.Add(r)
-	b.resolver.Enqueue(NewIPResolv(ip))
-	// fmt.Printf("%s - %s%s - %d - %s - %s\n", r.Source, r.Host, r.URL, asn.ASN, asn.Organization, geo.Country.Country)
+	newIP := b.history.Add(r)
+	if newIP {
+		b.resolver.Enqueue(NewIPResolv(ip))
+	}
 }
 
 type natsAuth struct {
@@ -60,6 +59,7 @@ func New(ctx context.Context, config *Config) (*Botex, error) {
 
 	b := &Botex{
 		config:            config,
+		blocklist:         NewBlocklist(ctx, config),
 		natsSubscriptions: make([]*nats.Subscription, 0),
 		ctx:               ctx,
 	}
@@ -68,17 +68,19 @@ func New(ctx context.Context, config *Config) (*Botex, error) {
 
 	// ASN Database
 	//
-	config.ASNDB, err = asndb.New(config.StaticBaseURL)
+	config.ASNDB, err = asndb.New(config.ASNDBFile)
 	if err != nil {
 		log.Fatal(err)
 	}
+	log.Infof("asndb loaded with %d records", config.ASNDB.Size())
 
 	// GeoIP Database
 	//
-	config.GEOIPDB, err = geoip.NewGeoIP(config.StaticBaseURL)
+	config.GEOIPDB, err = geoip.New(config.GeoIPDBFile)
 	if err != nil {
 		return nil, err
 	}
+	log.Infof("geoipdb loaded")
 
 	// NATS server
 	//
@@ -147,6 +149,7 @@ func New(ctx context.Context, config *Config) (*Botex, error) {
 
 	go b.resolvWorker(resolvChan)
 	go b.blockWorker()
+	go b.statsLogWorker()
 
 	// clean up when we're done
 	go func() {
@@ -167,11 +170,8 @@ func (b *Botex) blockWorker() {
 	for {
 		select {
 		case <-b.ctx.Done():
-			log.Trace("exiting block loop")
 			break
 		case block := <-b.config.BlockChan:
-			// TODO: write blocked IP to badger
-			log.Tracef("blocking %s  - %s (%s)", block.IP, block.Hostname, block.BlockReason)
 			if err := b.blocklist.Block(block); err != nil {
 				log.Errorf("failed to write blocked IP %s to kvstore: %s", block.IP, err)
 			}
@@ -183,15 +183,33 @@ func (b *Botex) resolvWorker(resolvChan chan *IPResolv) {
 	for {
 		select {
 		case <-b.ctx.Done():
-			log.Trace("exiting resolv loop")
 			break
 		case rip := <-resolvChan:
+			if rip == nil {
+				log.Warn("rip is nil")
+				continue
+			}
+			log.WithField("ip", rip.IP).WithField("host", rip.Host).Info("resolv done")
 			if rip.Err == "" {
 				log.Tracef("resolved %s to %s [%d tries]\n", rip.IP, rip.Host, rip.Tries)
 				b.history.SetHostname(rip.IP, rip.Host)
 			} else {
 				log.Tracef("failed to resolve %s: %s [%d tries]\n", rip.IP, rip.Err, rip.Tries)
 			}
+		}
+	}
+}
+
+func (b *Botex) statsLogWorker() {
+	for {
+		select {
+		case <-b.ctx.Done():
+			break
+		case <-time.After(10 * time.Second):
+			numIPs := b.history.Size()
+			stats := b.history.TotalStats()
+
+			log.Infof("stats :: %d IPs / %d Total / %d App / %d Other / %.2f Ratio", numIPs, stats.Total, stats.App, stats.Other, stats.Ratio)
 		}
 	}
 }

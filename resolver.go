@@ -24,12 +24,13 @@ const resolveNamespace = "rl"
 
 // Resolver is a DNS resolver with Redis cache
 type Resolver struct {
-	config       *Config
-	inChan       chan *nats.Msg
-	outChan      chan *IPResolv
-	natsJSONC    *nats.EncodedConn
-	subscription *nats.Subscription
-	ctx          context.Context
+	config          *Config
+	inChan          chan *nats.Msg
+	outChan         chan *IPResolv
+	outChanIsClosed bool
+	natsJSONC       *nats.EncodedConn
+	subscription    *nats.Subscription
+	ctx             context.Context
 }
 
 // IPResolv contains an IP address and its corresponding reverse hostname
@@ -65,9 +66,10 @@ func NewResolver(ctx context.Context, config *Config) (*Resolver, error) {
 	var err error
 
 	r := &Resolver{
-		config: config,
-		ctx:    ctx,
-		inChan: make(chan *nats.Msg),
+		config:          config,
+		ctx:             ctx,
+		outChanIsClosed: false,
+		inChan:          make(chan *nats.Msg),
 	}
 
 	r.natsJSONC, err = nats.NewEncodedConn(config.NatsConn, nats.JSON_ENCODER)
@@ -111,7 +113,7 @@ func (r *Resolver) worker(id int) {
 		select {
 		case <-r.ctx.Done():
 			log.Tracef("[Resolver::worker] resolver worker #%d exiting", id)
-			return
+			break
 		case msg := <-r.inChan:
 			var rip IPResolv
 			err := json.Unmarshal(msg.Data, &rip)
@@ -131,21 +133,39 @@ func (r *Resolver) reverseLookupKey(rip *IPResolv) string {
 }
 
 func (r *Resolver) reverseLookup(rip *IPResolv) {
+	if r.outChanIsClosed {
+		return
+	}
+
+	defer func() {
+		// recovering from panic caused by writing to a closed channel:
+		// mark the updateChan as closed
+		if recover() != nil {
+			r.outChanIsClosed = true
+		}
+	}()
+
 	// does the reverse hostname already exist in our cache?
 	//
+	var err error
 	ipKey := []byte(rip.IP.String())
 	resData, err := r.config.KVStore.Get([]byte(resolveNamespace), ipKey)
-	if err == nil && len(resData) > 0 {
-		rip.Host = string(resData)
-		r.outChan <- rip
+	if err == nil {
+		if len(resData) > 0 {
+			rip.Host = string(resData)
+			// log.Infof("kvstore %s = %s", rip.IP, rip.Host)
+			r.outChan <- rip
+			return
+		}
+
 		return
 	}
 
 	if err == badger.ErrKeyNotFound { // the hostname doesn't exist in the cache: resolve it via DNS
-		hostname, err := r.reverseDNSLookup(rip.IP)
+		hostname, err2 := r.reverseDNSLookup(rip.IP)
 
 		// a DNS lookup error occured: try again
-		if err != nil {
+		if err2 != nil && err2.Error() != "Key not found" {
 			log.Warnf("[Resolver::reverseLookup] reverse lookup %s error: %s", rip.IP, err)
 			rip.Err = err.Error()
 			r.Enqueue(rip)
@@ -156,7 +176,7 @@ func (r *Resolver) reverseLookup(rip *IPResolv) {
 		log.Tracef("[Resolver::reverseLookup] dns %s -> %s", rip.IP, hostname)
 		rip.Host = hostname
 
-		err2 := r.config.KVStore.SetEx([]byte(resolveNamespace), ipKey, []byte(hostname), r.config.ResolverTTL)
+		err2 = r.config.KVStore.SetEx([]byte(resolveNamespace), ipKey, []byte(hostname), r.config.ResolverTTL)
 		if err2 != nil {
 			log.Errorf("[Resolver::reverseLookup] failed to write %s (%d) to the cache: %s", rip.IP, rip.Host, err2)
 		}
