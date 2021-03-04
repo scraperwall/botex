@@ -5,6 +5,8 @@ import (
 	"net"
 	"sync"
 	"time"
+
+	log "github.com/sirupsen/logrus"
 )
 
 // History is the history of all IPs for which the application has received a request
@@ -14,6 +16,7 @@ type History struct {
 	mutex      sync.RWMutex
 	windowSize time.Duration
 	numWindows int
+	removeChan chan net.IP
 	ctx        context.Context
 }
 
@@ -24,11 +27,29 @@ func NewHistory(ctx context.Context, config *Config) *History {
 		data:       make(map[string]*IPData),
 		windowSize: config.WindowSize,
 		numWindows: config.NumWindows,
+		removeChan: make(chan net.IP),
 		mutex:      sync.RWMutex{},
 		ctx:        ctx,
 	}
 
+	go h.removeEmptyIPs()
+
 	return &h
+}
+
+func (h *History) removeEmptyIPs() {
+	for {
+		select {
+		case <-h.ctx.Done():
+			close(h.removeChan)
+			break
+		case ip := <-h.removeChan:
+			h.mutex.Lock()
+			log.Infof("removing %s from history", ip)
+			delete(h.data, ip.String())
+			h.mutex.Unlock()
+		}
+	}
 }
 
 // Add adds a single HTTP request to the history
@@ -41,8 +62,8 @@ func (h *History) Add(r *Request) bool {
 	ip := net.ParseIP(r.Source)
 	ipstr := ip.String()
 
-	if _, ok := h.data[r.Source]; !ok {
-		h.data[ipstr] = NewIPData(h.ctx, ip, h.config)
+	if _, ok := h.data[ip.String()]; !ok {
+		h.data[ipstr] = NewIPData(h.ctx, ip, h.removeChan, h.config)
 		newIP = true
 	}
 
@@ -56,7 +77,11 @@ func (h *History) SetHostname(ip net.IP, hostname string) {
 	h.mutex.Lock()
 	defer h.mutex.Unlock()
 
-	h.data[ip.String()].SetHostname(hostname)
+	if ipd, ok := h.data[ip.String()]; ok {
+		ipd.SetHostname(hostname)
+	} else {
+		log.Warnf("history ipdata for %s (%s) is nil", ip, hostname)
+	}
 }
 
 // Size returns the number of IPs in the history

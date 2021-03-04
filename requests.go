@@ -4,6 +4,7 @@ import (
 	"context"
 	"regexp"
 	"sync"
+	"time"
 
 	"github.com/scraperwall/rolling"
 )
@@ -27,12 +28,13 @@ type Requests struct {
 	config             *Config
 	mutex              sync.RWMutex
 	ctx                context.Context
+	cancel             context.CancelFunc
 }
 
 // NewRequests creates a new Requests item.
 // The app context and configuration get passed into the new item
 func NewRequests(ctx context.Context, config *Config, updateChan chan IPStats) *Requests {
-	return &Requests{
+	reqs := &Requests{
 		config:             config,
 		app:                rolling.NewTimePolicy(rolling.NewWindow(config.NumWindows), config.WindowSize),
 		other:              rolling.NewTimePolicy(rolling.NewWindow(config.NumWindows), config.WindowSize),
@@ -41,45 +43,67 @@ func NewRequests(ctx context.Context, config *Config, updateChan chan IPStats) *
 		updateChan:         updateChan,
 		updateChanIsClosed: false,
 		mutex:              sync.RWMutex{},
-		ctx:                ctx,
 	}
+
+	reqs.ctx, reqs.cancel = context.WithCancel(ctx)
+
+	go func() {
+		tick := time.NewTicker(config.WindowSize)
+
+		for {
+			select {
+			case <-reqs.ctx.Done():
+				tick.Stop()
+				tick = nil
+				return
+			case <-tick.C:
+				reqs.updateStats()
+			}
+		}
+	}()
+
+	return reqs
+}
+
+// Stop halts all go funcs
+func (r *Requests) Stop() {
+	r.cancel()
 }
 
 // Total returns the total number of requests
 func (r *Requests) Total() int {
-	return int(r.all.Reduce(rolling.Count))
+	r.mutex.RLock()
+	defer r.mutex.RUnlock()
+
+	return int(r.all.Reduce(rolling.Sum))
 }
 
 // App returns the number of all application requests
 func (r *Requests) App() int {
-	return int(r.app.Reduce(rolling.Count))
+	r.mutex.RLock()
+	defer r.mutex.RUnlock()
+
+	return int(r.app.Reduce(rolling.Sum))
 }
 
 // Other returns the number of all non-app requests
 func (r *Requests) Other() int {
-	return int(r.other.Reduce(rolling.Count))
+	r.mutex.RLock()
+	defer r.mutex.RUnlock()
+
+	return int(r.other.Reduce(rolling.Sum))
 }
 
-// Add adds a request
-func (r *Requests) Add(req *Request) {
-	if r.updateChanIsClosed {
-		return
-	}
-
-	r.all.Add(1.0, req.Time)
-
-	if assetRegexp.MatchString(req.URL) {
-		r.other.Append(1.0)
-	} else {
-		r.app.Append(1.0)
-	}
+func (r *Requests) updateStats() {
+	r.mutex.RLock()
+	defer r.mutex.RUnlock()
 
 	// update the stats on each request
 	// this makes sure the maximum number for the overall time window is used
 	//
-	total := r.all.Reduce(rolling.Count)
-	app := r.app.Reduce(rolling.Count)
-	other := r.other.Reduce(rolling.Count)
+	total := r.all.Reduce(rolling.Sum)
+	app := r.app.Reduce(rolling.Sum)
+	other := r.other.Reduce(rolling.Sum)
 
 	defer func() {
 		// recovering from panic caused by writing to a closed channel:
@@ -89,22 +113,54 @@ func (r *Requests) Add(req *Request) {
 		}
 	}()
 
-	r.updateChan <- IPStats{
+	ratio := 0.0
+	if total > 0.0 {
+		ratio = app / total
+	}
+
+	stats := IPStats{
 		Total: int(total),
 		App:   int(app),
 		Other: int(other),
-		Ratio: app/total + 1,
+		Ratio: ratio,
 	}
+
+	r.updateChan <- stats
+}
+
+// Add adds a request
+func (r *Requests) Add(req *Request) {
+	if r.updateChanIsClosed {
+		return
+	}
+
+	r.mutex.Lock()
+	r.all.Add(1, req.Time)
+
+	if assetRegexp.MatchString(req.URL) {
+		r.other.Add(1, req.Time)
+	} else {
+		r.app.Add(1, req.Time)
+	}
+	r.mutex.Unlock()
+
+	r.updateStats()
 }
 
 // Ratio returns the ratio of app requests / total requests
 func (r *Requests) Ratio() float64 {
+	r.mutex.RLock()
+	defer r.mutex.RUnlock()
+
 	return r.all.Reduce(rolling.Count) / r.app.Reduce(rolling.Count)
 }
 
 // ByTimeWindow returns an array of counts by each time window
 func (r *Requests) ByTimeWindow() []int {
 	var data []int
+
+	r.mutex.RLock()
+	defer r.mutex.RUnlock()
 
 	agg := func(w rolling.Window) float64 {
 		for _, bucket := range w {

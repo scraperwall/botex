@@ -35,20 +35,22 @@ func (b *Botex) Idle() bool {
 
 // HandleRequest handles incoming requests
 func (b *Botex) HandleRequest(r *Request) {
-	ip := net.ParseIP(r.Source)
+	go func() {
+		ip := net.ParseIP(r.Source)
 
-	// TODO: is the URL or Host whitelisted?
+		// TODO: is the URL or Host whitelisted?
 
-	if r.Timestamp < 1<<32 { // seconds
-		r.Time = time.Unix(r.Timestamp, 0)
-	} else { // nanoseconds
-		r.Time = time.Unix(0, r.Timestamp)
-	}
-	newIP := b.history.Add(r)
-	if newIP {
-		log.Tracef("enqueueing %s", ip)
-		b.resolver.Enqueue(NewIPResolv(ip))
-	}
+		if r.Timestamp < 1<<32 { // seconds
+			r.Time = time.Unix(r.Timestamp, 0)
+		} else { // nanoseconds
+			r.Time = time.Unix(0, r.Timestamp)
+		}
+		newIP := b.history.Add(r)
+		if newIP {
+			log.Tracef("enqueueing %s", ip)
+			b.resolver.Enqueue(NewIPResolv(ip))
+		}
+	}()
 }
 
 type natsAuth struct {
@@ -113,7 +115,15 @@ func New(ctx context.Context, config *Config) (*Botex, error) {
 
 	// NATS client
 	//
-	config.NatsConn, err = nats.Connect(fmt.Sprintf("nats://127.0.0.1:%d/", config.NatsPort), nats.UserInfo(config.NatsUser, config.NatsPassword))
+	natsSlowLogFunc := func(c *nats.Conn, s *nats.Subscription, err error) {
+		// limita, limitb, _ := s.PendingLimits()
+		pnum, psize, _ := s.Pending()
+		delivered, _ := s.Delivered()
+		dropped, _ := s.Dropped()
+
+		log.Warnf("nats error: %s del: %d / drop: %d / pend: %d/%d / err: %v", s.Subject, delivered, dropped, pnum, psize, err)
+	}
+	config.NatsConn, err = nats.Connect(fmt.Sprintf("nats://127.0.0.1:%d/", config.NatsPort), nats.ErrorHandler(natsSlowLogFunc), nats.UserInfo(config.NatsUser, config.NatsPassword))
 	if err != nil {
 		config.NatsServer.Shutdown()
 		return nil, err
@@ -130,6 +140,7 @@ func New(ctx context.Context, config *Config) (*Botex, error) {
 		b.config.NatsServer.Shutdown()
 		return nil, err
 	}
+	reqSubscription.SetPendingLimits(200000, 10*1024*1024*1024) // 200.000 messages or 10GB
 
 	b.natsSubscriptions = append(b.natsSubscriptions, reqSubscription)
 
@@ -205,7 +216,7 @@ func (b *Botex) resolvWorker(resolvChan chan *IPResolv) {
 				log.Warn("rip is nil")
 				continue
 			}
-			log.Infof("[%d] ip %s resolved to %s", count, rip.IP, rip.Host)
+			log.Tracef("[%d] ip %s resolved to %s", count, rip.IP, rip.Host)
 			if rip.Err == "" {
 				log.Tracef("resolved %s to %s [%d tries]", rip.IP, rip.Host, rip.Tries)
 				b.history.SetHostname(rip.IP, rip.Host)
@@ -217,11 +228,15 @@ func (b *Botex) resolvWorker(resolvChan chan *IPResolv) {
 }
 
 func (b *Botex) statsLogWorker() {
+	ticker := time.NewTicker(10 * time.Second)
 	for {
+
 		select {
 		case <-b.ctx.Done():
-			break
-		case <-time.After(10 * time.Second):
+			ticker.Stop()
+			ticker = nil
+			return
+		case <-ticker.C:
 			numIPs := b.history.Size()
 			stats := b.history.TotalStats()
 

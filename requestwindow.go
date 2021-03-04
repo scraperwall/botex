@@ -61,12 +61,16 @@ func (rw *RequestsWindow) Requests() []*Request {
 }
 
 func (rw *RequestsWindow) cleanup() {
+	ticker := time.NewTicker(time.Second)
+
 	for {
 		select {
 		case <-rw.ctx.Done():
 			rw.data.Init()
+			ticker.Stop()
+			ticker = nil
 			break
-		case <-time.After(time.Second):
+		case <-ticker.C:
 			now := time.Now()
 
 			rw.mutex.Lock()

@@ -33,6 +33,7 @@ type IPDetails struct {
 	Ratio       float64      `json:"ratio"`
 	IsBlocked   bool         `json:"isblocked"`
 	BlockReason string       `json:"blockreason"`
+	CreatedAt   time.Time    `json:"createdat"`
 	LastBlockAt time.Time    `json:"lastblockat"`
 }
 
@@ -44,6 +45,7 @@ type IPData struct {
 	config *Config
 
 	updateChan chan IPStats
+	removeChan chan net.IP
 	Requests   *Requests
 
 	mutex sync.RWMutex
@@ -52,7 +54,7 @@ type IPData struct {
 
 // NewIPData creates a new IPData item fro a given IP.
 // the parent context and app configuration are passed on from the parent
-func NewIPData(ctx context.Context, ip net.IP, config *Config) *IPData {
+func NewIPData(ctx context.Context, ip net.IP, removeChan chan net.IP, config *Config) *IPData {
 	asn := config.ASNDB.Lookup(ip)
 	geo, _ := config.GEOIPDB.Lookup(ip)
 
@@ -60,17 +62,19 @@ func NewIPData(ctx context.Context, ip net.IP, config *Config) *IPData {
 
 	ipd := &IPData{
 		IPDetails: IPDetails{
-			IP:       ip,
-			Hostname: "",
-			ASN:      asn,
-			GeoIP:    geo,
-			Total:    0,
-			App:      0,
-			Other:    0,
-			Ratio:    0.0,
+			IP:        ip,
+			Hostname:  "",
+			ASN:       asn,
+			GeoIP:     geo,
+			Total:     0,
+			App:       0,
+			Other:     0,
+			Ratio:     0.0,
+			CreatedAt: time.Now(),
 		},
 		config:     config,
 		updateChan: updateChan,
+		removeChan: removeChan,
 		mutex:      sync.RWMutex{},
 		Requests:   NewRequests(ctx, config, updateChan),
 		ctx:        ctx,
@@ -96,6 +100,10 @@ func (ipd *IPData) Add(r *Request) {
 
 // SetHostname sets the reverse hostname for an IP
 func (ipd *IPData) SetHostname(hostname string) {
+	if ipd == nil {
+		log.Warn("ipd is nil")
+		return
+	}
 	ipd.mutex.Lock()
 	ipd.Hostname = hostname
 	ipd.mutex.Unlock()
@@ -142,9 +150,14 @@ func (ipd *IPData) updateStats() {
 			ipd.Other = stats.Other
 			ipd.Ratio = stats.Ratio
 
+			if ipd.Total <= 0 { // && ipd.CreatedAt.Add(ipd.config.WindowSize).Before(time.Now()) {
+				ipd.Requests.Stop()
+				ipd.removeChan <- ipd.IP
+			}
+
 			if ipd.ShouldBeBlocked() {
 				now := time.Now()
-				if true || ipd.LastBlockAt.Add(ipd.config.BlockTTL).Before(now) {
+				if ipd.LastBlockAt.Add(ipd.config.BlockTTL).Before(now) {
 					ipd.LastBlockAt = time.Now()
 					ipd.config.BlockChan <- &ipd.IPDetails
 				}

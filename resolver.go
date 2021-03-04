@@ -7,8 +7,6 @@ import (
 	"net"
 	"time"
 
-	// "github.com/go-redis/redis/v7"
-
 	"github.com/miekg/dns"
 	nats "github.com/nats-io/nats.go"
 	log "github.com/sirupsen/logrus"
@@ -23,9 +21,8 @@ const resolveNamespace = "rl"
 // Resolver is a DNS resolver with Redis cache
 type Resolver struct {
 	config          *Config
-	inChan          chan *nats.Msg
+	inChan          chan *IPResolv
 	outChan         chan *IPResolv
-	inputChan       chan *IPResolv
 	outChanIsClosed bool
 	natsJSONC       *nats.EncodedConn
 	subscription    *nats.Subscription
@@ -68,8 +65,7 @@ func NewResolver(ctx context.Context, config *Config) (*Resolver, error) {
 		config:          config,
 		ctx:             ctx,
 		outChanIsClosed: false,
-		inChan:          make(chan *nats.Msg),
-		inputChan:       make(chan *IPResolv, 10000),
+		inChan:          make(chan *IPResolv),
 	}
 
 	r.natsJSONC, err = nats.NewEncodedConn(config.NatsConn, nats.JSON_ENCODER)
@@ -77,10 +73,11 @@ func NewResolver(ctx context.Context, config *Config) (*Resolver, error) {
 		return nil, err
 	}
 
-	r.subscription, err = r.natsJSONC.Conn.ChanSubscribe(resolveTopic, r.inChan)
+	r.subscription, err = r.natsJSONC.BindRecvChan(resolveTopic, r.inChan)
 	if err != nil {
 		return nil, err
 	}
+	r.subscription.SetPendingLimits(100000, 1024*1024*1024) // 100.000 messages or 1GB
 
 	go r.autoClose()
 
@@ -115,23 +112,11 @@ func (r *Resolver) worker(id int) {
 		select {
 		case <-r.ctx.Done():
 			log.Tracef("resolver worker #%d exiting", id)
-			break
-		case rip := <-r.inputChan:
+			return
+		case rip := <-r.inChan:
 			count++
-			log.Infof("[%d] trying to resolve %s", count, rip.IP)
+			log.Tracef("worker %d #%d - resolving %s", id, count, rip.IP)
 			r.reverseLookup(rip)
-			/*
-				case msg := <-r.inChan:
-					var rip IPResolv
-					err := json.Unmarshal(msg.Data, &rip)
-					if err != nil {
-						log.Warnf("failed to unmarshal IPresolv (%s): %s", string(msg.Data), err)
-						continue
-					}
-					count++
-					log.Tracef("worker %d #%d - resolving %s", id, count, rip.IP)
-					r.reverseLookup(&rip)
-			*/
 		}
 	}
 }
@@ -146,14 +131,17 @@ func (r *Resolver) reverseLookup(rip *IPResolv) {
 		return
 	}
 
-	defer func() {
-		// recovering from panic caused by writing to a closed channel:
-		// mark the updateChan as closed
-		if recover() != nil {
-			log.Warn("resolver outChan is closed")
-			r.outChanIsClosed = true
-		}
-	}()
+	/*
+		defer func() {
+			// recovering from panic caused by writing to a closed channel:
+			// mark the updateChan as closed
+			if err := recover(); err != nil {
+				log.Warn("resolver outChan is closed")
+				log.Fatal(err)
+				r.outChanIsClosed = true
+			}
+		}()
+	*/
 
 	// does the reverse hostname already exist in our cache?
 	//
@@ -163,7 +151,7 @@ func (r *Resolver) reverseLookup(rip *IPResolv) {
 	if err == nil {
 		if len(resData) > 0 {
 			rip.Host = string(resData)
-			log.Infof("kvstore %s = %s", rip.IP, rip.Host)
+			log.Tracef("kvstore %s = %s", rip.IP, rip.Host)
 			r.outChan <- rip
 			return
 		}
@@ -174,7 +162,7 @@ func (r *Resolver) reverseLookup(rip *IPResolv) {
 
 		// a DNS lookup error occured: try again
 		if err2 != nil {
-			log.Warnf("reverse lookup %s error: %s", rip.IP, err)
+			log.Warnf("reverse lookup %s error: %s", rip.IP, err2)
 			rip.Err = err.Error()
 			r.Enqueue(rip)
 			return
@@ -191,13 +179,11 @@ func (r *Resolver) reverseLookup(rip *IPResolv) {
 		}
 	} else {
 		// an error occured while retrieving the hostname from the cache: try again
-		log.Tracef("serious badger lookup error for %s: %s", rip.IP, err)
-		rip.Err = err.Error()
+		log.Tracef("serious badger lookup error: %s", err)
+		// rip.Err = err.Error()
 		r.Enqueue(rip)
 		return
 	}
-
-	// r.outChan <- rip
 }
 
 type resolvResult struct {
@@ -234,7 +220,7 @@ func (r *Resolver) reverseDNSLookup(ip net.IP) (string, error) {
 			hostname = t.Ptr[0 : len(t.Ptr)-1]
 		}
 	} else {
-		log.Warnf("dns answer for %s too small. Using %s", ip, ip)
+		log.Tracef("dns answer for %s too small. Using %s", ip, ip)
 	}
 
 	return hostname, nil
@@ -254,11 +240,8 @@ func (r *Resolver) Enqueue(rip *IPResolv) {
 	log.Tracef("try #%d %s", rip.Tries, rip.IP)
 
 	// try to resolve the IP again
-	r.inputChan <- rip
-	/*
-		err := r.natsJSONC.Publish(resolveTopic, rip)
-		if err != nil {
-			log.Errorf("error publishing: %s", err)
-		}
-	*/
+	err := r.natsJSONC.Publish(resolveTopic, rip)
+	if err != nil {
+		log.Errorf("error publishing: %s", err)
+	}
 }
