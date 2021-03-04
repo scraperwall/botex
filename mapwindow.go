@@ -5,7 +5,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/asecurityteam/rolling"
+	"github.com/scraperwall/rolling"
 )
 
 // MapWindow is a map that contains a rolling.TimePolicy for each entry

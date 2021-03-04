@@ -3,6 +3,8 @@ package main
 import (
 	"context"
 	"fmt"
+	"net/http"
+	_ "net/http/pprof"
 	"os"
 	"os/signal"
 	"path"
@@ -32,6 +34,10 @@ func (hook lineNumberHook) Fire(entry *log.Entry) error {
 }
 
 func main() {
+	go http.ListenAndServe(":8080", http.DefaultServeMux)
+
+	quit := make(chan os.Signal, 1)
+	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
 
 	config := botex.Config{}
 
@@ -55,6 +61,8 @@ func main() {
 	flag.IntVar(&config.MinAppRequests, "min-app-requests", 10, "don't block an IP if it makes less than this many app requests")
 	flag.IntVar(&config.MaxAppRequests, "max-app-requests", 50, "block an IP if it makes more than this many app requests")
 	flag.Float64Var(&config.MaxRatio, "max-ratio", 0.8, "block IPs if the app/total ratio is above this value and it has more than -min-app-requests app requests")
+	flag.StringVar(&config.LogFormat, "log-format", `$remote_addr - $remote_user [$time_local] "$request" $status $body_bytes_sent "$http_referer" "$http_user_agent"`, "the log format to parse")
+	flag.StringVar(&config.LogReplay, "log-replay", "", "replay this log file")
 
 	flag.Parse()
 
@@ -68,10 +76,13 @@ func main() {
 		log.Fatal(err)
 	}
 
-	b.Idle()
+	// b.Idle()
 
-	quit := make(chan os.Signal, 1)
-	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
+	if config.LogReplay != "" {
+		go func() {
+			b.LogReplay(config.LogReplay, config.LogFormat)
+		}()
+	}
 
 	<-quit
 	cancel()

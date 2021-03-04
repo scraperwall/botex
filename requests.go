@@ -5,7 +5,7 @@ import (
 	"regexp"
 	"sync"
 
-	"github.com/asecurityteam/rolling"
+	"github.com/scraperwall/rolling"
 )
 
 var assetRegexp *regexp.Regexp
@@ -66,7 +66,7 @@ func (r *Requests) Add(req *Request) {
 		return
 	}
 
-	r.all.Append(1.0)
+	r.all.Add(1.0, req.Time)
 
 	if assetRegexp.MatchString(req.URL) {
 		r.other.Append(1.0)
@@ -93,7 +93,7 @@ func (r *Requests) Add(req *Request) {
 		Total: int(total),
 		App:   int(app),
 		Other: int(other),
-		Ratio: app / total,
+		Ratio: app/total + 1,
 	}
 }
 

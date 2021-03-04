@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"net"
+	"sync"
 	"time"
 
 	"github.com/scraperwall/asndb/v2"
@@ -13,10 +14,11 @@ import (
 
 // IPStats contains aggregated statistics about a single IP
 type IPStats struct {
-	Total int
-	App   int
-	Other int
-	Ratio float64
+	Total        int
+	App          int
+	Other        int
+	Ratio        float64
+	WithHostname int
 }
 
 // IPDetails contains meta information about an IP, its aggregated statistics and a reason for why it was blocked
@@ -44,7 +46,8 @@ type IPData struct {
 	updateChan chan IPStats
 	Requests   *Requests
 
-	ctx context.Context
+	mutex sync.RWMutex
+	ctx   context.Context
 }
 
 // NewIPData creates a new IPData item fro a given IP.
@@ -68,6 +71,7 @@ func NewIPData(ctx context.Context, ip net.IP, config *Config) *IPData {
 		},
 		config:     config,
 		updateChan: updateChan,
+		mutex:      sync.RWMutex{},
 		Requests:   NewRequests(ctx, config, updateChan),
 		ctx:        ctx,
 	}
@@ -92,7 +96,9 @@ func (ipd *IPData) Add(r *Request) {
 
 // SetHostname sets the reverse hostname for an IP
 func (ipd *IPData) SetHostname(hostname string) {
+	ipd.mutex.Lock()
 	ipd.Hostname = hostname
+	ipd.mutex.Unlock()
 	ipd.updateChan <- IPStats{
 		Total: ipd.Total,
 		App:   ipd.App,

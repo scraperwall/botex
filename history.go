@@ -78,6 +78,9 @@ func (h *History) TotalStats() IPStats {
 		stats.Total += ipd.Total
 		stats.App += ipd.App
 		stats.Other += ipd.Other
+		if ipd.Hostname != "" {
+			stats.WithHostname++
+		}
 	}
 
 	stats.Ratio = float64(stats.App) / float64(stats.Total)

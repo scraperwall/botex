@@ -32,6 +32,8 @@ type Config struct {
 	MaxRatio        float64
 	MinAppRequests  int
 	MaxAppRequests  int
+	LogReplay       string
+	LogFormat       string
 
 	ASNDB      *asndb.DB
 	GEOIPDB    *geoip.DB

@@ -15,6 +15,8 @@ import (
 	log "github.com/sirupsen/logrus"
 )
 
+const natsRequestsSubject = "requests"
+
 // Botex detects bad bots
 type Botex struct {
 	natsSubscriptions []*nats.Subscription
@@ -37,9 +39,14 @@ func (b *Botex) HandleRequest(r *Request) {
 
 	// TODO: is the URL or Host whitelisted?
 
-	r.Time = time.Unix(r.Timestamp, 0)
+	if r.Timestamp < 1<<32 { // seconds
+		r.Time = time.Unix(r.Timestamp, 0)
+	} else { // nanoseconds
+		r.Time = time.Unix(0, r.Timestamp)
+	}
 	newIP := b.history.Add(r)
 	if newIP {
+		log.Tracef("enqueueing %s", ip)
 		b.resolver.Enqueue(NewIPResolv(ip))
 	}
 }
@@ -84,13 +91,18 @@ func New(ctx context.Context, config *Config) (*Botex, error) {
 
 	// NATS server
 	//
-	nopts := &natsd.Options{}
-	nopts.CustomClientAuthentication = &natsAuth{
-		User:     config.NatsUser,
-		Password: config.NatsPassword,
+	nopts := &natsd.Options{
+		HTTPPort: config.NatsHTTPPort,
+		Port:     config.NatsPort,
+		CustomClientAuthentication: &natsAuth{
+			User:     config.NatsUser,
+			Password: config.NatsPassword,
+		},
+		MaxConn:      1 << 12,
+		MaxPending:   1 << 32,
+		NoLog:        false,
+		TraceVerbose: true,
 	}
-	nopts.HTTPPort = config.NatsHTTPPort
-	nopts.Port = config.NatsPort
 
 	config.NatsServer = natsd.New(nopts)
 	go config.NatsServer.Start()
@@ -113,7 +125,7 @@ func New(ctx context.Context, config *Config) (*Botex, error) {
 		return nil, err
 	}
 
-	reqSubscription, err := jsonc.Subscribe("requests", b.HandleRequest)
+	reqSubscription, err := jsonc.Subscribe(natsRequestsSubject, b.HandleRequest)
 	if err != nil {
 		b.config.NatsServer.Shutdown()
 		return nil, err
@@ -141,7 +153,7 @@ func New(ctx context.Context, config *Config) (*Botex, error) {
 		return nil, err
 	}
 
-	resolvChan := make(chan *IPResolv)
+	resolvChan := make(chan *IPResolv, 2000)
 	err = b.resolver.StartWorkers(resolvChan)
 	if err != nil {
 		return nil, err
@@ -180,21 +192,25 @@ func (b *Botex) blockWorker() {
 }
 
 func (b *Botex) resolvWorker(resolvChan chan *IPResolv) {
+	count := 0
+
 	for {
 		select {
 		case <-b.ctx.Done():
 			break
 		case rip := <-resolvChan:
+			count++
+
 			if rip == nil {
 				log.Warn("rip is nil")
 				continue
 			}
-			log.WithField("ip", rip.IP).WithField("host", rip.Host).Info("resolv done")
+			log.Infof("[%d] ip %s resolved to %s", count, rip.IP, rip.Host)
 			if rip.Err == "" {
-				log.Tracef("resolved %s to %s [%d tries]\n", rip.IP, rip.Host, rip.Tries)
+				log.Tracef("resolved %s to %s [%d tries]", rip.IP, rip.Host, rip.Tries)
 				b.history.SetHostname(rip.IP, rip.Host)
 			} else {
-				log.Tracef("failed to resolve %s: %s [%d tries]\n", rip.IP, rip.Err, rip.Tries)
+				log.Tracef("failed to resolve %s: %s [%d tries]", rip.IP, rip.Err, rip.Tries)
 			}
 		}
 	}
@@ -209,7 +225,7 @@ func (b *Botex) statsLogWorker() {
 			numIPs := b.history.Size()
 			stats := b.history.TotalStats()
 
-			log.Infof("stats :: %d IPs / %d Total / %d App / %d Other / %.2f Ratio", numIPs, stats.Total, stats.App, stats.Other, stats.Ratio)
+			log.Infof("stats :: %d IPs / %d with hostname :: Requests %d Total / %d App / %d Other / %.2f Ratio", numIPs, stats.WithHostname, stats.Total, stats.App, stats.Other, stats.Ratio)
 		}
 	}
 }

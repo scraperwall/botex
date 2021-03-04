@@ -2,7 +2,6 @@ package botex
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"net"
@@ -10,7 +9,6 @@ import (
 
 	// "github.com/go-redis/redis/v7"
 
-	badger "github.com/dgraph-io/badger/v3"
 	"github.com/miekg/dns"
 	nats "github.com/nats-io/nats.go"
 	log "github.com/sirupsen/logrus"
@@ -27,6 +25,7 @@ type Resolver struct {
 	config          *Config
 	inChan          chan *nats.Msg
 	outChan         chan *IPResolv
+	inputChan       chan *IPResolv
 	outChanIsClosed bool
 	natsJSONC       *nats.EncodedConn
 	subscription    *nats.Subscription
@@ -70,6 +69,7 @@ func NewResolver(ctx context.Context, config *Config) (*Resolver, error) {
 		ctx:             ctx,
 		outChanIsClosed: false,
 		inChan:          make(chan *nats.Msg),
+		inputChan:       make(chan *IPResolv, 10000),
 	}
 
 	r.natsJSONC, err = nats.NewEncodedConn(config.NatsConn, nats.JSON_ENCODER)
@@ -105,25 +105,33 @@ func (r *Resolver) StartWorkers(outChan chan *IPResolv) error {
 // Close cleans up all open connections and file handles
 func (r *Resolver) autoClose() {
 	<-r.ctx.Done()
+	log.Infof("resolver stopping nats subscription")
 	r.subscription.Drain()
 }
 
 func (r *Resolver) worker(id int) {
+	count := 0
 	for {
 		select {
 		case <-r.ctx.Done():
-			log.Tracef("[Resolver::worker] resolver worker #%d exiting", id)
+			log.Tracef("resolver worker #%d exiting", id)
 			break
-		case msg := <-r.inChan:
-			var rip IPResolv
-			err := json.Unmarshal(msg.Data, &rip)
-			log.Tracef("[Resolver::worker] raw resolv in %s", rip.IP)
-			if err != nil {
-				log.Warnf("[Resolver::worker] failed to unmarshal IPresolv (%s): %s", string(msg.Data), err)
-				continue
-			}
-			log.Tracef("[Resolver::worker] resolving %s\n", rip.IP)
-			r.reverseLookup(&rip)
+		case rip := <-r.inputChan:
+			count++
+			log.Infof("[%d] trying to resolve %s", count, rip.IP)
+			r.reverseLookup(rip)
+			/*
+				case msg := <-r.inChan:
+					var rip IPResolv
+					err := json.Unmarshal(msg.Data, &rip)
+					if err != nil {
+						log.Warnf("failed to unmarshal IPresolv (%s): %s", string(msg.Data), err)
+						continue
+					}
+					count++
+					log.Tracef("worker %d #%d - resolving %s", id, count, rip.IP)
+					r.reverseLookup(&rip)
+			*/
 		}
 	}
 }
@@ -134,6 +142,7 @@ func (r *Resolver) reverseLookupKey(rip *IPResolv) string {
 
 func (r *Resolver) reverseLookup(rip *IPResolv) {
 	if r.outChanIsClosed {
+		log.Warn("outChan is closed")
 		return
 	}
 
@@ -141,6 +150,7 @@ func (r *Resolver) reverseLookup(rip *IPResolv) {
 		// recovering from panic caused by writing to a closed channel:
 		// mark the updateChan as closed
 		if recover() != nil {
+			log.Warn("resolver outChan is closed")
 			r.outChanIsClosed = true
 		}
 	}()
@@ -153,42 +163,46 @@ func (r *Resolver) reverseLookup(rip *IPResolv) {
 	if err == nil {
 		if len(resData) > 0 {
 			rip.Host = string(resData)
-			// log.Infof("kvstore %s = %s", rip.IP, rip.Host)
+			log.Infof("kvstore %s = %s", rip.IP, rip.Host)
 			r.outChan <- rip
 			return
 		}
-
-		return
 	}
 
-	if err == badger.ErrKeyNotFound { // the hostname doesn't exist in the cache: resolve it via DNS
+	if err == r.config.KVStore.ErrNotFound() { // the hostname doesn't exist in the cache: resolve it via DNS
 		hostname, err2 := r.reverseDNSLookup(rip.IP)
 
 		// a DNS lookup error occured: try again
-		if err2 != nil && err2.Error() != "Key not found" {
-			log.Warnf("[Resolver::reverseLookup] reverse lookup %s error: %s", rip.IP, err)
+		if err2 != nil {
+			log.Warnf("reverse lookup %s error: %s", rip.IP, err)
 			rip.Err = err.Error()
 			r.Enqueue(rip)
 			return
 		}
 
 		// the DNS lookup was successful: set the hostname and cache it
-		log.Tracef("[Resolver::reverseLookup] dns %s -> %s", rip.IP, hostname)
+		log.Tracef("dns %s -> %s", rip.IP, hostname)
 		rip.Host = hostname
+		r.outChan <- rip
 
 		err2 = r.config.KVStore.SetEx([]byte(resolveNamespace), ipKey, []byte(hostname), r.config.ResolverTTL)
 		if err2 != nil {
-			log.Errorf("[Resolver::reverseLookup] failed to write %s (%d) to the cache: %s", rip.IP, rip.Host, err2)
+			log.Errorf("failed to write %s (%d) to the cache: %s", rip.IP, rip.Host, err2)
 		}
 	} else {
 		// an error occured while retrieving the hostname from the cache: try again
-		log.Tracef("[Resolver::reverseLookup] badger lookup %s serious error: %s", rip.IP, err)
+		log.Tracef("serious badger lookup error for %s: %s", rip.IP, err)
 		rip.Err = err.Error()
 		r.Enqueue(rip)
 		return
 	}
 
-	r.outChan <- rip
+	// r.outChan <- rip
+}
+
+type resolvResult struct {
+	Hostname string
+	Error    error
 }
 
 func (r *Resolver) reverseDNSLookup(ip net.IP) (string, error) {
@@ -196,11 +210,12 @@ func (r *Resolver) reverseDNSLookup(ip net.IP) (string, error) {
 
 	reverse, err := dns.ReverseAddr(ip.To16().String())
 	if err != nil {
+		log.Warnf("ReverseAddr error for %s: %s", ip, err)
 		return "", err
 	}
 
 	dnsClient := new(dns.Client)
-	dnsClient.Timeout = 2500 * time.Millisecond
+	// dnsClient.Timeout = 2500 * time.Millisecond
 
 	p := new(dns.Msg)
 	p.Id = dns.Id()
@@ -209,6 +224,7 @@ func (r *Resolver) reverseDNSLookup(ip net.IP) (string, error) {
 
 	resp, _, err := dnsClient.Exchange(p, r.config.DNSServer)
 	if err != nil {
+		log.Warnf("dns exchange error for %s: %s", ip, err)
 		return "", err
 	}
 
@@ -217,9 +233,11 @@ func (r *Resolver) reverseDNSLookup(ip net.IP) (string, error) {
 		if t, ok := resp.Answer[0].(*dns.PTR); ok {
 			hostname = t.Ptr[0 : len(t.Ptr)-1]
 		}
+	} else {
+		log.Warnf("dns answer for %s too small. Using %s", ip, ip)
 	}
 
-	return hostname, err
+	return hostname, nil
 }
 
 // Enqueue queues a ReverseResolvable to be resolved
@@ -229,14 +247,18 @@ func (r *Resolver) Enqueue(rip *IPResolv) {
 
 	// stop trying if too many errors have occured
 	if rip.Tries > r.config.ResolverTries {
+		log.Tracef("max tries (%d) reached for %d", r.config.ResolverTries, rip.Tries)
 		return
 	}
 
-	log.Tracef("[Resolver::Enqueue] *Q%d* %s\n", rip.Tries, rip.IP)
+	log.Tracef("try #%d %s", rip.Tries, rip.IP)
 
 	// try to resolve the IP again
-	err := r.natsJSONC.Publish(resolveTopic, rip)
-	if err != nil {
-		log.Errorf("[Resolver::Enqueue] error publishing: %s", err)
-	}
+	r.inputChan <- rip
+	/*
+		err := r.natsJSONC.Publish(resolveTopic, rip)
+		if err != nil {
+			log.Errorf("error publishing: %s", err)
+		}
+	*/
 }
