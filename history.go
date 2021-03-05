@@ -45,7 +45,9 @@ func (h *History) removeEmptyIPs() {
 			break
 		case ip := <-h.removeChan:
 			h.mutex.Lock()
-			log.Infof("removing %s from history", ip)
+			log.Tracef("removing %s from history", ip)
+			h.data[ip.String()].Stop()
+			h.data[ip.String()] = nil
 			delete(h.data, ip.String())
 			h.mutex.Unlock()
 		}

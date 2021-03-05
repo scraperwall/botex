@@ -23,18 +23,21 @@ type IPStats struct {
 
 // IPDetails contains meta information about an IP, its aggregated statistics and a reason for why it was blocked
 type IPDetails struct {
-	IP          net.IP       `json:"ip"`
-	Hostname    string       `json:"hostname"`
-	ASN         *asndb.ASN   `json:"asn"`
-	GeoIP       *geoip.GeoIP `json:"geoip"`
-	Total       int          `json:"total"`
-	App         int          `json:"app"`
-	Other       int          `json:"other"`
-	Ratio       float64      `json:"ratio"`
-	IsBlocked   bool         `json:"isblocked"`
-	BlockReason string       `json:"blockreason"`
-	CreatedAt   time.Time    `json:"createdat"`
-	LastBlockAt time.Time    `json:"lastblockat"`
+	IP              net.IP       `json:"ip"`
+	Hostname        string       `json:"hostname"`
+	ASN             *asndb.ASN   `json:"asn"`
+	GeoIP           *geoip.GeoIP `json:"geoip"`
+	Total           int          `json:"total"`
+	App             int          `json:"app"`
+	Other           int          `json:"other"`
+	Ratio           float64      `json:"ratio"`
+	IsBlocked       bool         `json:"isblocked"`
+	BlockReason     string       `json:"blockreason"`
+	Whitelisted     bool         `json:"whitelisted"`
+	WhitelistReason string       `json:"whitelistreason"`
+	CreatedAt       time.Time    `json:"createdat"`
+	UpdatedAt       time.Time    `json:"updatedat"`
+	LastBlockAt     time.Time    `json:"lastblockat"`
 }
 
 // IPData contains IPDetails and the most recent HTTP requests.
@@ -48,8 +51,9 @@ type IPData struct {
 	removeChan chan net.IP
 	Requests   *Requests
 
-	mutex sync.RWMutex
-	ctx   context.Context
+	mutex  sync.RWMutex
+	ctx    context.Context
+	cancel context.CancelFunc
 }
 
 // NewIPData creates a new IPData item fro a given IP.
@@ -59,6 +63,8 @@ func NewIPData(ctx context.Context, ip net.IP, removeChan chan net.IP, config *C
 	geo, _ := config.GEOIPDB.Lookup(ip)
 
 	updateChan := make(chan IPStats)
+
+	myctx, mycancel := context.WithCancel(ctx)
 
 	ipd := &IPData{
 		IPDetails: IPDetails{
@@ -71,13 +77,15 @@ func NewIPData(ctx context.Context, ip net.IP, removeChan chan net.IP, config *C
 			Other:     0,
 			Ratio:     0.0,
 			CreatedAt: time.Now(),
+			UpdatedAt: time.Unix(0, 0),
 		},
 		config:     config,
 		updateChan: updateChan,
 		removeChan: removeChan,
 		mutex:      sync.RWMutex{},
 		Requests:   NewRequests(ctx, config, updateChan),
-		ctx:        ctx,
+		ctx:        myctx,
+		cancel:     mycancel,
 	}
 
 	/*
@@ -95,6 +103,7 @@ func NewIPData(ctx context.Context, ip net.IP, removeChan chan net.IP, config *C
 // Add adds a single HTTP request
 func (ipd *IPData) Add(r *Request) {
 	// log.Infof("+ %s - %s%s - %d - %s - %s\n", r.Source, r.Host, r.URL, ipd.ASN.ASN, ipd.ASN.Organization, ipd.GeoIP.Country.Country)
+	ipd.UpdatedAt = time.Now()
 	ipd.Requests.Add(r)
 }
 
@@ -119,11 +128,22 @@ func (ipd *IPData) SetHostname(hostname string) {
 func (ipd *IPData) ShouldBeBlocked() bool {
 	log.Tracef("%s (%s) total: %d/%d/%d, ratio: %.2f/%.2f", ipd.IP, ipd.Hostname, ipd.Total, ipd.config.MinAppRequests, ipd.config.MaxAppRequests, ipd.Ratio, ipd.config.MaxRatio)
 
-	if ipd.Hostname == "" {
+	if ipd.Hostname == "" || ipd.Whitelisted {
 		return false
 	}
 
-	// TODO: is the IP/Hostname whitelisted?
+	// don't block unless we've seen new requests in the current window
+	threshold := time.Now().Add(-1 * ipd.config.WindowSize)
+	if ipd.UpdatedAt.Before(threshold) && ipd.CreatedAt.Before(threshold) {
+		return false
+	}
+
+	// Is the IP whitelisted?
+	if wl, descr := ipd.config.Whitelist.IsWhitelisted(&ipd.IPDetails); wl {
+		ipd.Whitelisted = true
+		ipd.WhitelistReason = descr
+		return false
+	}
 
 	if ipd.Total > ipd.config.MaxAppRequests {
 		ipd.BlockReason = fmt.Sprintf("too many requests (%d/%d)", ipd.Total, ipd.config.MaxAppRequests)
@@ -139,19 +159,29 @@ func (ipd *IPData) ShouldBeBlocked() bool {
 	return false
 }
 
+// Stop signals that this intance is no longer needed an can self-destruct
+func (ipd *IPData) Stop() {
+	ipd.cancel()
+}
+
 func (ipd *IPData) updateStats() {
 	for {
 		select {
 		case <-ipd.ctx.Done():
-			break
+			ipd.IP = nil
+			ipd.ASN = nil
+			ipd.GeoIP = nil
+			return
 		case stats := <-ipd.updateChan:
 			ipd.Total = stats.Total
 			ipd.App = stats.App
 			ipd.Other = stats.Other
 			ipd.Ratio = stats.Ratio
 
-			if ipd.Total <= 0 { // && ipd.CreatedAt.Add(ipd.config.WindowSize).Before(time.Now()) {
+			if ipd.Total <= 0 && ipd.CreatedAt.Add(ipd.config.WindowSize).Before(time.Now()) {
 				ipd.Requests.Stop()
+				//ipd.Requests = nil
+				//close(ipd.updateChan)
 				ipd.removeChan <- ipd.IP
 			}
 

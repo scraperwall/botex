@@ -175,7 +175,7 @@ func (r *Resolver) reverseLookup(rip *IPResolv) {
 
 		err2 = r.config.KVStore.SetEx([]byte(resolveNamespace), ipKey, []byte(hostname), r.config.ResolverTTL)
 		if err2 != nil {
-			log.Errorf("failed to write %s (%d) to the cache: %s", rip.IP, rip.Host, err2)
+			log.Errorf("failed to write %s (%s) to the cache: %s", rip.IP, rip.Host, err2)
 		}
 	} else {
 		// an error occured while retrieving the hostname from the cache: try again

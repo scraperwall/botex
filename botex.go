@@ -5,9 +5,11 @@ import (
 	"errors"
 	"fmt"
 	"net"
+	"runtime"
 	"time"
 
 	badger "github.com/dgraph-io/badger/v3"
+	"github.com/dustin/go-humanize"
 	natsd "github.com/nats-io/nats-server/v2/server"
 	nats "github.com/nats-io/nats.go"
 	"github.com/scraperwall/asndb/v2"
@@ -24,6 +26,7 @@ type Botex struct {
 	history           *History
 	blocklist         *Blocklist
 	config            *Config
+	api               *API
 
 	ctx context.Context
 }
@@ -66,9 +69,11 @@ func (na *natsAuth) Check(c natsd.ClientAuthentication) bool {
 func New(ctx context.Context, config *Config) (*Botex, error) {
 	var err error
 
+	blocklistRecheckChan := make(chan bool)
+
 	b := &Botex{
 		config:            config,
-		blocklist:         NewBlocklist(ctx, config),
+		blocklist:         NewBlocklist(ctx, blocklistRecheckChan, config),
 		natsSubscriptions: make([]*nats.Subscription, 0),
 		ctx:               ctx,
 	}
@@ -153,6 +158,13 @@ func New(ctx context.Context, config *Config) (*Botex, error) {
 		return nil, err
 	}
 
+	// Whitelist
+	//
+	config.Whitelist, err = NewWhitelist(ctx, blocklistRecheckChan, config)
+	if err != nil {
+		log.Fatal(err)
+	}
+
 	// History
 	//
 	b.history = NewHistory(ctx, config)
@@ -168,6 +180,18 @@ func New(ctx context.Context, config *Config) (*Botex, error) {
 	err = b.resolver.StartWorkers(resolvChan)
 	if err != nil {
 		return nil, err
+	}
+
+	// API
+	//
+	b.api, err = NewAPI(ctx, config, b)
+	if err != nil {
+		return nil, err
+	}
+	go b.api.run()
+
+	if config.LogMemorStats {
+		go b.logMemoryStats(ctx)
 	}
 
 	go b.resolvWorker(resolvChan)
@@ -187,6 +211,30 @@ func New(ctx context.Context, config *Config) (*Botex, error) {
 	}()
 
 	return b, nil
+}
+
+func (b *Botex) logMemoryStats(ctx context.Context) {
+	ticker := time.NewTicker(b.config.WindowSize / 3)
+	for {
+		select {
+		case <-ctx.Done():
+			ticker.Stop()
+			ticker = nil
+			return
+		case <-ticker.C:
+			var m runtime.MemStats
+			runtime.ReadMemStats(&m)
+
+			log.Infof("-=- alloc: %s, sys: %s, heap_sys: %s, heap_inuse: %s, frees: %s, stack: %s, goroutines: %s",
+				humanize.Bytes(m.Alloc),
+				humanize.Bytes(m.Sys),
+				humanize.Bytes(m.HeapSys),
+				humanize.Bytes(m.HeapInuse),
+				humanize.FormatInteger("#,###.", int(m.Frees)),
+				humanize.Bytes(m.StackInuse),
+				humanize.FormatInteger("#,###.", runtime.NumGoroutine()))
+		}
+	}
 }
 
 func (b *Botex) blockWorker() {
@@ -240,7 +288,7 @@ func (b *Botex) statsLogWorker() {
 			numIPs := b.history.Size()
 			stats := b.history.TotalStats()
 
-			log.Infof("stats :: %d IPs / %d with hostname :: Requests %d Total / %d App / %d Other / %.2f Ratio", numIPs, stats.WithHostname, stats.Total, stats.App, stats.Other, stats.Ratio)
+			log.Infof("stats :: %d IPs / %d with hostname / %d blocked :: Requests %d Total / %d App / %d Other / %.2f Ratio", numIPs, stats.WithHostname, b.blocklist.Count(), stats.Total, stats.App, stats.Other, stats.Ratio)
 		}
 	}
 }

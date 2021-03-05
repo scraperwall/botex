@@ -36,8 +36,9 @@ func (b *Botex) LogReplay(logfile, format string) {
 		log.Fatal(err)
 	}
 
-	tStart := time.Now().Add(-1 * time.Hour)
-	timePerLine := time.Duration(float64(time.Hour) / float64(lines))
+	tOffset := b.config.WindowSize * time.Duration(b.config.NumWindows)
+	tStart := time.Now().Add(-1 * tOffset)
+	timePerLine := time.Duration(int(tOffset) / lines)
 	log.Infof("time per line: %v, lines: %d", timePerLine, lines)
 
 	if format == "" {

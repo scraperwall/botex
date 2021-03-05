@@ -34,12 +34,16 @@ type Config struct {
 	MaxAppRequests  int
 	LogReplay       string
 	LogFormat       string
+	APIAddress      string
+	LogMemorStats   bool
+	WhitelistTOML   string
 
 	ASNDB      *asndb.DB
 	GEOIPDB    *geoip.DB
 	NatsServer *natsd.Server
 	NatsConn   *nats.Conn
 	KVStore    KVStore
+	Whitelist  *Whitelist
 
 	BlockChan chan *IPDetails
 }

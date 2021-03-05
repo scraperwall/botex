@@ -84,11 +84,14 @@ func (mw *MapWindow) Size() int {
 
 func (mw *MapWindow) cleanup() {
 	ticker := time.NewTicker(mw.windowSize)
+
 	for {
 		select {
 		case <-mw.ctx.Done():
 			ticker.Stop()
-			break
+			ticker = nil
+			mw.data = nil
+			return
 		case <-ticker.C:
 			mw.mutex.Lock()
 			for ua, window := range mw.data {

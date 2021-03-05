@@ -6,7 +6,6 @@ import (
 	"time"
 
 	badger "github.com/dgraph-io/badger/v3"
-	"github.com/kr/pretty"
 	log "github.com/sirupsen/logrus"
 )
 
@@ -95,6 +94,13 @@ func (bdb *BadgerDB) SetEx(namespace, key, value []byte, ttl time.Duration) erro
 	return nil
 }
 
+// Remove removes a single entry from the database
+func (bdb *BadgerDB) Remove(namespace, key []byte) error {
+	return bdb.db.Update(func(txn *badger.Txn) error {
+		return txn.Delete(bdb.badgerNamespaceKey(namespace, key))
+	})
+}
+
 // Has implements the DB interface. It returns a boolean reflecting if the
 // datbase has a given key for a namespace or not. An error is only returned if
 // an error to Get would be returned that is not of type badger.ErrKeyNotFound.
@@ -149,7 +155,6 @@ func (bdb *BadgerDB) All(namespace, prefix []byte) ([][]byte, error) {
 		prefix := bdb.badgerNamespaceKey(namespace, prefix)
 		for it.Seek(prefix); it.ValidForPrefix(prefix); it.Next() {
 			item := it.Item()
-			pretty.Println(item)
 			err := item.Value(func(v []byte) error {
 				data := make([]byte, 0)
 				copy(data, v)
@@ -168,6 +173,47 @@ func (bdb *BadgerDB) All(namespace, prefix []byte) ([][]byte, error) {
 	}
 
 	return res, nil
+}
+
+// Each iterates over all items that match namespace and prefix
+func (bdb *BadgerDB) Each(namespace, prefix []byte, callback KVStoreEachFunc) error {
+	return bdb.db.View(func(txn *badger.Txn) error {
+		it := txn.NewIterator(badger.DefaultIteratorOptions)
+		defer it.Close()
+		prefix := bdb.badgerNamespaceKey(namespace, prefix)
+		for it.Seek(prefix); it.ValidForPrefix(prefix); it.Next() {
+			item := it.Item()
+			err := item.Value(func(v []byte) error {
+				callback(v)
+				return nil
+			})
+			if err != nil {
+				return err
+			}
+		}
+		return nil
+	})
+}
+
+// Count returns the number of entries that match namespace and prefix
+func (bdb *BadgerDB) Count(namespace, prefix []byte) (int, error) {
+	c := 0
+
+	err := bdb.db.View(func(txn *badger.Txn) error {
+		it := txn.NewIterator(badger.DefaultIteratorOptions)
+		defer it.Close()
+		prefix := bdb.badgerNamespaceKey(namespace, prefix)
+		for it.Seek(prefix); it.ValidForPrefix(prefix); it.Next() {
+			c++
+		}
+		return nil
+	})
+
+	if err != nil {
+		return c, err
+	}
+
+	return c, nil
 }
 
 // ErrNotFound is the error badger returns when it can't find a key in the database

@@ -34,29 +34,35 @@ type Requests struct {
 // NewRequests creates a new Requests item.
 // The app context and configuration get passed into the new item
 func NewRequests(ctx context.Context, config *Config, updateChan chan IPStats) *Requests {
+	myctx, mycancel := context.WithCancel(ctx)
+
 	reqs := &Requests{
 		config:             config,
 		app:                rolling.NewTimePolicy(rolling.NewWindow(config.NumWindows), config.WindowSize),
 		other:              rolling.NewTimePolicy(rolling.NewWindow(config.NumWindows), config.WindowSize),
 		all:                rolling.NewTimePolicy(rolling.NewWindow(config.NumWindows), config.WindowSize),
-		userAgents:         NewMapWindow(ctx, config.WindowSize, config.NumWindows),
+		userAgents:         NewMapWindow(myctx, config.WindowSize, config.NumWindows),
 		updateChan:         updateChan,
 		updateChanIsClosed: false,
 		mutex:              sync.RWMutex{},
+		ctx:                myctx,
+		cancel:             mycancel,
 	}
 
-	reqs.ctx, reqs.cancel = context.WithCancel(ctx)
-
 	go func() {
-		tick := time.NewTicker(config.WindowSize)
+		ticker := time.NewTicker(config.WindowSize)
 
 		for {
 			select {
 			case <-reqs.ctx.Done():
-				tick.Stop()
-				tick = nil
+				ticker.Stop()
+				ticker = nil
+				reqs.app = nil
+				reqs.other = nil
+				reqs.all = nil
+				reqs.userAgents = nil
 				return
-			case <-tick.C:
+			case <-ticker.C:
 				reqs.updateStats()
 			}
 		}
