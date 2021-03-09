@@ -64,7 +64,7 @@ func main() {
 	flag.StringVar(&config.LogFormat, "log-format", `$remote_addr - $remote_user [$time_local] "$request" $status $body_bytes_sent "$http_referer" "$http_user_agent"`, "the log format to parse")
 	flag.StringVar(&config.LogReplay, "log-replay", "", "replay this log file")
 	flag.StringVar(&config.APIAddress, "api-address", "127.0.0.1:4343", "the address and port at which the API listens")
-	flag.BoolVar(&config.LogMemorStats, "log-memory-stats", false, "regularly log the memory consumption of the program")
+	flag.BoolVar(&config.LogMemoryStats, "log-memory-stats", false, "regularly log the memory consumption of the program")
 	flag.StringVar(&config.WhitelistTOML, "whitelist", "./config/whitelist.toml", "the whitelist configuration file")
 
 	flag.Parse()

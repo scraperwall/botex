@@ -88,13 +88,6 @@ func NewIPData(ctx context.Context, ip net.IP, removeChan chan net.IP, config *C
 		cancel:     mycancel,
 	}
 
-	/*
-		go func() {
-			for range time.Tick(3 * time.Second) {
-				log.Infof("%s - %s :: total %d / app %d / oher %d / ratio %.2f", ipd.IP, ipd.Hostname, ipd.Total, ipd.App, ipd.Other, ipd.Ratio)
-			}
-		}()
-	*/
 	go ipd.updateStats()
 
 	return ipd
@@ -102,7 +95,6 @@ func NewIPData(ctx context.Context, ip net.IP, removeChan chan net.IP, config *C
 
 // Add adds a single HTTP request
 func (ipd *IPData) Add(r *Request) {
-	// log.Infof("+ %s - %s%s - %d - %s - %s\n", r.Source, r.Host, r.URL, ipd.ASN.ASN, ipd.ASN.Organization, ipd.GeoIP.Country.Country)
 	ipd.UpdatedAt = time.Now()
 	ipd.Requests.Add(r)
 }
@@ -161,7 +153,9 @@ func (ipd *IPData) ShouldBeBlocked() bool {
 
 // Stop signals that this intance is no longer needed an can self-destruct
 func (ipd *IPData) Stop() {
-	ipd.cancel()
+	if ipd != nil {
+		ipd.cancel()
+	}
 }
 
 func (ipd *IPData) updateStats() {
@@ -179,10 +173,12 @@ func (ipd *IPData) updateStats() {
 			ipd.Ratio = stats.Ratio
 
 			if ipd.Total <= 0 && ipd.CreatedAt.Add(ipd.config.WindowSize).Before(time.Now()) {
+				close(ipd.updateChan)
 				ipd.Requests.Stop()
-				//ipd.Requests = nil
-				//close(ipd.updateChan)
+				ipd.Requests = nil
+				log.Tracef("marking %s to be removed", ipd.IP)
 				ipd.removeChan <- ipd.IP
+				return
 			}
 
 			if ipd.ShouldBeBlocked() {

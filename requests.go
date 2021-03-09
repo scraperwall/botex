@@ -6,7 +6,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/scraperwall/rolling"
+	log "github.com/sirupsen/logrus"
 )
 
 var assetRegexp *regexp.Regexp
@@ -19,10 +19,11 @@ func init() {
 // The requests are divied by their type: app and other (assets)
 // Requests notifies its parent of changes through updateChan
 type Requests struct {
-	app                *rolling.TimePolicy
-	other              *rolling.TimePolicy
-	all                *rolling.TimePolicy
+	app                *Window
+	other              *Window
+	all                *Window
 	userAgents         *MapWindow
+	latest             *RequestsWindow
 	updateChan         chan IPStats
 	updateChanIsClosed bool
 	config             *Config
@@ -38,29 +39,27 @@ func NewRequests(ctx context.Context, config *Config, updateChan chan IPStats) *
 
 	reqs := &Requests{
 		config:             config,
-		app:                rolling.NewTimePolicy(rolling.NewWindow(config.NumWindows), config.WindowSize),
-		other:              rolling.NewTimePolicy(rolling.NewWindow(config.NumWindows), config.WindowSize),
-		all:                rolling.NewTimePolicy(rolling.NewWindow(config.NumWindows), config.WindowSize),
+		app:                NewWindow(myctx, config.WindowSize, config.NumWindows),
+		other:              NewWindow(myctx, config.WindowSize, config.NumWindows),
+		all:                NewWindow(myctx, config.WindowSize, config.NumWindows),
 		userAgents:         NewMapWindow(myctx, config.WindowSize, config.NumWindows),
+		latest:             NewRequestsWindow(myctx, config),
 		updateChan:         updateChan,
 		updateChanIsClosed: false,
 		mutex:              sync.RWMutex{},
-		ctx:                myctx,
 		cancel:             mycancel,
 	}
 
 	go func() {
 		ticker := time.NewTicker(config.WindowSize)
-
 		for {
 			select {
-			case <-reqs.ctx.Done():
-				ticker.Stop()
-				ticker = nil
+			case <-myctx.Done():
 				reqs.app = nil
 				reqs.other = nil
 				reqs.all = nil
 				reqs.userAgents = nil
+				reqs.latest = nil
 				return
 			case <-ticker.C:
 				reqs.updateStats()
@@ -81,7 +80,7 @@ func (r *Requests) Total() int {
 	r.mutex.RLock()
 	defer r.mutex.RUnlock()
 
-	return int(r.all.Reduce(rolling.Sum))
+	return int(r.all.Count())
 }
 
 // App returns the number of all application requests
@@ -89,7 +88,7 @@ func (r *Requests) App() int {
 	r.mutex.RLock()
 	defer r.mutex.RUnlock()
 
-	return int(r.app.Reduce(rolling.Sum))
+	return int(r.app.Count())
 }
 
 // Other returns the number of all non-app requests
@@ -97,19 +96,24 @@ func (r *Requests) Other() int {
 	r.mutex.RLock()
 	defer r.mutex.RUnlock()
 
-	return int(r.other.Reduce(rolling.Sum))
+	return int(r.other.Count())
 }
 
 func (r *Requests) updateStats() {
+	if r.updateChanIsClosed {
+		log.Info("updateChan is closed")
+		return
+	}
+
 	r.mutex.RLock()
 	defer r.mutex.RUnlock()
 
 	// update the stats on each request
 	// this makes sure the maximum number for the overall time window is used
 	//
-	total := r.all.Reduce(rolling.Sum)
-	app := r.app.Reduce(rolling.Sum)
-	other := r.other.Reduce(rolling.Sum)
+	total := r.all.Count()
+	app := r.app.Count()
+	other := r.other.Count()
 
 	defer func() {
 		// recovering from panic caused by writing to a closed channel:
@@ -121,7 +125,7 @@ func (r *Requests) updateStats() {
 
 	ratio := 0.0
 	if total > 0.0 {
-		ratio = app / total
+		ratio = float64(app) / float64(total)
 	}
 
 	stats := IPStats{
@@ -140,14 +144,24 @@ func (r *Requests) Add(req *Request) {
 		return
 	}
 
+	if req == nil {
+		return
+	}
+
 	r.mutex.Lock()
-	r.all.Add(1, req.Time)
+	if r.all == nil {
+		return
+	}
+	r.all.Add(req.Time)
 
 	if assetRegexp.MatchString(req.URL) {
-		r.other.Add(1, req.Time)
+		r.other.Add(req.Time)
 	} else {
-		r.app.Add(1, req.Time)
+		r.app.Add(req.Time)
 	}
+
+	r.latest.Add(req)
+	r.userAgents.Add(req)
 	r.mutex.Unlock()
 
 	r.updateStats()
@@ -158,25 +172,15 @@ func (r *Requests) Ratio() float64 {
 	r.mutex.RLock()
 	defer r.mutex.RUnlock()
 
-	return r.all.Reduce(rolling.Count) / r.app.Reduce(rolling.Count)
+	return float64(r.all.Count()) / float64(r.app.Count())
 }
 
-// ByTimeWindow returns an array of counts by each time window
-func (r *Requests) ByTimeWindow() []int {
-	var data []int
+// Latest returns the most recent requests
+func (r *Requests) Latest() []*Request {
+	return r.latest.Requests()
+}
 
-	r.mutex.RLock()
-	defer r.mutex.RUnlock()
-
-	agg := func(w rolling.Window) float64 {
-		for _, bucket := range w {
-			data = append(data, len(bucket))
-		}
-
-		return 0.0
-	}
-
-	r.all.Reduce(agg)
-
-	return data
+// Useragents returns a map made up of the user agent and its responding count
+func (r *Requests) Useragents() map[string]int {
+	return r.userAgents.TotalMap()
 }

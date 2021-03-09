@@ -41,8 +41,6 @@ func (b *Botex) HandleRequest(r *Request) {
 	go func() {
 		ip := net.ParseIP(r.Source)
 
-		// TODO: is the URL or Host whitelisted?
-
 		if r.Timestamp < 1<<32 { // seconds
 			r.Time = time.Unix(r.Timestamp, 0)
 		} else { // nanoseconds
@@ -190,7 +188,7 @@ func New(ctx context.Context, config *Config) (*Botex, error) {
 	}
 	go b.api.run()
 
-	if config.LogMemorStats {
+	if config.LogMemoryStats {
 		go b.logMemoryStats(ctx)
 	}
 
@@ -214,7 +212,7 @@ func New(ctx context.Context, config *Config) (*Botex, error) {
 }
 
 func (b *Botex) logMemoryStats(ctx context.Context) {
-	ticker := time.NewTicker(b.config.WindowSize / 3)
+	ticker := time.NewTicker(b.config.WindowSize)
 	for {
 		select {
 		case <-ctx.Done():
@@ -222,14 +220,17 @@ func (b *Botex) logMemoryStats(ctx context.Context) {
 			ticker = nil
 			return
 		case <-ticker.C:
+			if !b.config.LogMemoryStats {
+				continue
+			}
 			var m runtime.MemStats
 			runtime.ReadMemStats(&m)
 
-			log.Infof("-=- alloc: %s, sys: %s, heap_sys: %s, heap_inuse: %s, frees: %s, stack: %s, goroutines: %s",
+			log.Infof("-=- alloc: %s, in_use: %s, sys: %s, heap_sys: %s, frees: %s, stack: %s, goroutines: %s",
 				humanize.Bytes(m.Alloc),
+				humanize.Bytes(m.HeapInuse),
 				humanize.Bytes(m.Sys),
 				humanize.Bytes(m.HeapSys),
-				humanize.Bytes(m.HeapInuse),
 				humanize.FormatInteger("#,###.", int(m.Frees)),
 				humanize.Bytes(m.StackInuse),
 				humanize.FormatInteger("#,###.", runtime.NumGoroutine()))
@@ -241,7 +242,7 @@ func (b *Botex) blockWorker() {
 	for {
 		select {
 		case <-b.ctx.Done():
-			break
+			return
 		case block := <-b.config.BlockChan:
 			if err := b.blocklist.Block(block); err != nil {
 				log.Errorf("failed to write blocked IP %s to kvstore: %s", block.IP, err)
@@ -256,7 +257,7 @@ func (b *Botex) resolvWorker(resolvChan chan *IPResolv) {
 	for {
 		select {
 		case <-b.ctx.Done():
-			break
+			return
 		case rip := <-resolvChan:
 			count++
 

@@ -3,10 +3,12 @@ package botex
 import (
 	"context"
 	"encoding/json"
+	"net"
 	"net/http"
 	"sort"
 
 	"github.com/fvbock/endless"
+	"github.com/gin-contrib/cors"
 	"github.com/gin-gonic/gin"
 	log "github.com/sirupsen/logrus"
 )
@@ -34,8 +36,12 @@ func NewAPI(ctx context.Context, config *Config, botex *Botex) (api *API, err er
 
 func (a *API) run() {
 	r := gin.Default()
+	corsConfig := cors.DefaultConfig()
+	corsConfig.AllowAllOrigins = true
+	r.Use(cors.New(corsConfig))
 	a.engine = r
 	r.GET("/blocked", a.getBlocked)
+	r.GET("/ip/:ip", a.getIP)
 
 	endless.ListenAndServe(a.config.APIAddress, r)
 }
@@ -62,4 +68,25 @@ func (a *API) getBlocked(c *gin.Context) {
 	})
 
 	c.JSON(http.StatusOK, blocked)
+}
+
+func (a *API) getIP(c *gin.Context) {
+	ipdata := a.botex.history.IPData(net.ParseIP(c.Param("ip")))
+
+	if ipdata == nil {
+		c.AbortWithStatusJSON(http.StatusNotFound, gin.H{})
+		return
+	}
+
+	var data struct {
+		IPDetails  *IPDetails
+		Requests   []*Request
+		Useragents map[string]int
+	}
+
+	data.IPDetails = &ipdata.IPDetails
+	data.Requests = ipdata.Requests.Latest()
+	data.Useragents = ipdata.Requests.Useragents()
+
+	c.JSON(http.StatusOK, data)
 }

@@ -42,7 +42,7 @@ func (h *History) removeEmptyIPs() {
 		select {
 		case <-h.ctx.Done():
 			close(h.removeChan)
-			break
+			return
 		case ip := <-h.removeChan:
 			h.mutex.Lock()
 			log.Tracef("removing %s from history", ip)
@@ -69,6 +69,7 @@ func (h *History) Add(r *Request) bool {
 		newIP = true
 	}
 
+	log.Tracef("%s - %s", time.Now().Sub(r.Time), r.URL)
 	h.data[ipstr].Add(r)
 
 	return newIP
@@ -113,4 +114,20 @@ func (h *History) TotalStats() IPStats {
 	stats.Ratio = float64(stats.App) / float64(stats.Total)
 
 	return stats
+}
+
+// IPDetails returns the IPDetails for the given IP
+func (h *History) IPDetails(ip net.IP) *IPDetails {
+	h.mutex.RLock()
+	defer h.mutex.RUnlock()
+
+	return &h.data[ip.String()].IPDetails
+}
+
+// IPData returns the IPData struct for the given IP
+func (h *History) IPData(ip net.IP) *IPData {
+	h.mutex.RLock()
+	defer h.mutex.RUnlock()
+
+	return h.data[ip.String()]
 }

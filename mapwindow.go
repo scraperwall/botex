@@ -4,15 +4,13 @@ import (
 	"context"
 	"sync"
 	"time"
-
-	"github.com/scraperwall/rolling"
 )
 
 // MapWindow is a map that contains a rolling.TimePolicy for each entry
 type MapWindow struct {
 	windowSize time.Duration
 	numWindows int
-	data       map[string]*rolling.TimePolicy
+	data       map[string]*Window
 	mutex      sync.RWMutex
 	ctx        context.Context
 }
@@ -23,7 +21,7 @@ func NewMapWindow(ctx context.Context, windowSize time.Duration, numWindows int)
 	mw := MapWindow{
 		windowSize: windowSize,
 		numWindows: numWindows,
-		data:       make(map[string]*rolling.TimePolicy),
+		data:       make(map[string]*Window),
 		mutex:      sync.RWMutex{},
 		ctx:        ctx,
 	}
@@ -34,16 +32,15 @@ func NewMapWindow(ctx context.Context, windowSize time.Duration, numWindows int)
 }
 
 // Add adds one item for the given key
-func (mw *MapWindow) Add(key string) {
+func (mw *MapWindow) Add(req *Request) {
 	mw.mutex.Lock()
 	defer mw.mutex.Unlock()
 
-	if _, ok := mw.data[key]; !ok {
-		window := rolling.NewWindow(mw.numWindows)
-		mw.data[key] = rolling.NewTimePolicy(window, mw.windowSize)
+	if _, ok := mw.data[req.UserAgent]; !ok {
+		mw.data[req.UserAgent] = NewWindow(mw.ctx, mw.windowSize, mw.numWindows)
 	}
 
-	mw.data[key].Append(1.0)
+	mw.data[req.UserAgent].Add(req.Time)
 }
 
 // Total determines the sum of all map entries
@@ -54,7 +51,7 @@ func (mw *MapWindow) Total() int {
 	total := 0
 
 	for _, window := range mw.data {
-		total += int(window.Reduce(rolling.Count))
+		total += int(window.Count())
 	}
 
 	return total
@@ -68,7 +65,7 @@ func (mw *MapWindow) TotalMap() map[string]int {
 	data := make(map[string]int)
 
 	for k, window := range mw.data {
-		data[k] = int(window.Reduce(rolling.Count))
+		data[k] = int(window.Count())
 	}
 
 	return data
@@ -95,7 +92,7 @@ func (mw *MapWindow) cleanup() {
 		case <-ticker.C:
 			mw.mutex.Lock()
 			for ua, window := range mw.data {
-				if window.Reduce(rolling.Count) <= 0.0 {
+				if window.Count() <= 0 {
 					delete(mw.data, ua)
 				}
 			}

@@ -9,6 +9,7 @@ type Request struct {
 	UserAgent string    `json:"useragent"`
 	Source    string    `json:"source"`
 	Method    string    `json:"method"`
+	Seq       int       `json:"seq"`
 	Timestamp int64     `json:"timestamp"`
 	Time      time.Time `json:"-"`
 }

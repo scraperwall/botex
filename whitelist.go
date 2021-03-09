@@ -318,7 +318,7 @@ func (wl *Whitelist) reloadOnConfigChanges() {
 				if !ok {
 					return
 				}
-				log.Warn("whitelist rule watcher error event: %s", err)
+				log.Warnf("whitelist rule watcher error event: %s", err)
 			}
 		}
 	}()

@@ -35,7 +35,7 @@ type Config struct {
 	LogReplay       string
 	LogFormat       string
 	APIAddress      string
-	LogMemorStats   bool
+	LogMemoryStats  bool
 	WhitelistTOML   string
 
 	ASNDB      *asndb.DB
