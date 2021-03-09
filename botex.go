@@ -186,7 +186,6 @@ func New(ctx context.Context, config *Config) (*Botex, error) {
 	if err != nil {
 		return nil, err
 	}
-	go b.api.run()
 
 	if config.LogMemoryStats {
 		go b.logMemoryStats(ctx)
