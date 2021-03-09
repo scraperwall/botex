@@ -225,14 +225,15 @@ func (b *Botex) logMemoryStats(ctx context.Context) {
 			var m runtime.MemStats
 			runtime.ReadMemStats(&m)
 
-			log.Infof("-=- alloc: %s, in_use: %s, sys: %s, heap_sys: %s, frees: %s, stack: %s, goroutines: %s",
+			log.Infof("-=- alloc: %s, in_use: %s, objs: %s, idle: %s, released: %s, stack: %s, goroutines: %s, frees: %s",
 				humanize.Bytes(m.Alloc),
 				humanize.Bytes(m.HeapInuse),
-				humanize.Bytes(m.Sys),
-				humanize.Bytes(m.HeapSys),
-				humanize.FormatInteger("#,###.", int(m.Frees)),
+				humanize.FormatInteger("#,###.", int(m.HeapObjects)),
+				humanize.Bytes(m.HeapIdle),
+				humanize.Bytes(m.HeapReleased),
 				humanize.Bytes(m.StackInuse),
-				humanize.FormatInteger("#,###.", runtime.NumGoroutine()))
+				humanize.FormatInteger("#,###.", runtime.NumGoroutine()),
+				humanize.FormatInteger("#,###.", int(m.Frees)))
 		}
 	}
 }

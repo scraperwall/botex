@@ -53,6 +53,10 @@ func (w *Window) Count() int64 {
 	w.mutex.RLock()
 	defer w.mutex.RUnlock()
 
+	if w == nil || w.data == nil {
+		return 0
+	}
+
 	var total int64
 
 	iter := w.data.Iterator()
