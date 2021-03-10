@@ -3,6 +3,7 @@ package botex
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net"
 	"net/http"
 	"sort"
@@ -42,8 +43,32 @@ func (a *API) run() {
 	a.engine = r
 	r.GET("/blocked", a.getBlocked)
 	r.GET("/ip/:ip", a.getIP)
+	if a.config.WithNetworks {
+		r.GET("/networks", a.getNetworks)
+		r.GET("/network/:ip/:bits", a.getNetwork)
+	}
 
 	endless.ListenAndServe(a.config.APIAddress, r)
+}
+
+func (a *API) getNetworks(c *gin.Context) {
+	c.JSON(http.StatusOK, a.botex.networks.All())
+}
+
+func (a *API) getNetwork(c *gin.Context) {
+	_, network, err := net.ParseCIDR(fmt.Sprintf("%s/%s", c.Param("ip"), c.Param("bits")))
+	if err != nil {
+		c.AbortWithStatusJSON(http.StatusNotAcceptable, gin.H{"error": fmt.Sprintf("%s is not a valid network in CIDR notation", c.Param("cidr"))})
+		return
+	}
+	log.Infof("getting network %s", network)
+	n, ok := a.botex.networks.Get(network)
+	if !ok {
+		c.AbortWithStatusJSON(http.StatusNotFound, gin.H{})
+		return
+	}
+
+	c.JSON(http.StatusOK, n)
 }
 
 func (a *API) getBlocked(c *gin.Context) {

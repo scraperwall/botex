@@ -37,6 +37,7 @@ type Config struct {
 	APIAddress      string
 	LogMemoryStats  bool
 	WhitelistTOML   string
+	WithNetworks    bool
 
 	ASNDB      *asndb.DB
 	GEOIPDB    *geoip.DB

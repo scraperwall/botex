@@ -140,11 +140,7 @@ func (r *Requests) updateStats() {
 
 // Add adds a request
 func (r *Requests) Add(req *Request) {
-	if r.updateChanIsClosed {
-		return
-	}
-
-	if req == nil {
+	if r == nil || req == nil || r.updateChanIsClosed {
 		return
 	}
 

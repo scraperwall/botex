@@ -45,7 +45,7 @@ func (w *Window) Add(t time.Time) {
 
 	val++
 
-	w.data.Put(w.keyFor(t), val)
+	w.data.Put(key, val)
 }
 
 // Count returns the total count of items in all buckets

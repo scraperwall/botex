@@ -131,18 +131,6 @@ func (r *Resolver) reverseLookup(rip *IPResolv) {
 		return
 	}
 
-	/*
-		defer func() {
-			// recovering from panic caused by writing to a closed channel:
-			// mark the updateChan as closed
-			if err := recover(); err != nil {
-				log.Warn("resolver outChan is closed")
-				log.Fatal(err)
-				r.outChanIsClosed = true
-			}
-		}()
-	*/
-
 	// does the reverse hostname already exist in our cache?
 	//
 	var err error
@@ -162,7 +150,6 @@ func (r *Resolver) reverseLookup(rip *IPResolv) {
 
 		// a DNS lookup error occured: try again
 		if err2 != nil {
-			log.Warnf("reverse lookup %s error: %s", rip.IP, err2)
 			rip.Err = err.Error()
 			r.Enqueue(rip)
 			return
@@ -194,9 +181,12 @@ type resolvResult struct {
 func (r *Resolver) reverseDNSLookup(ip net.IP) (string, error) {
 	var hostname string
 
+	if ip == nil {
+		return "", fmt.Errorf("ip is nil")
+	}
+
 	reverse, err := dns.ReverseAddr(ip.To16().String())
 	if err != nil {
-		log.Warnf("ReverseAddr error for %s: %s", ip, err)
 		return "", err
 	}
 

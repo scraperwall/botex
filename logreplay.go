@@ -59,13 +59,11 @@ func (b *Botex) LogReplay(logfile, format string) {
 
 		logEntry, err := p.ParseString(l)
 		if err != nil {
-			log.Println(err)
 			continue
 		}
 
 		remote, err = logEntry.Field("remote_addr")
 		if err != nil {
-			log.Println(err)
 			continue
 		}
 
@@ -75,7 +73,6 @@ func (b *Botex) LogReplay(logfile, format string) {
 		}
 
 		if remote == "" {
-			log.Println("remote is empty: ignoring request.")
 			continue
 		}
 
@@ -86,13 +83,12 @@ func (b *Botex) LogReplay(logfile, format string) {
 
 		httpRequest, err := logEntry.Field("request")
 		if err != nil {
-			log.Println(err)
 			continue
 		}
 
 		reqData := reqRegexp.FindStringSubmatch(httpRequest)
 		if len(reqData) < 4 {
-			log.Printf("reqData is too short: %d instead of 4\n", len(reqData))
+			log.Infof("reqData is too short: %d instead of 4\n", len(reqData))
 			continue
 		}
 
@@ -110,8 +106,6 @@ func (b *Botex) LogReplay(logfile, format string) {
 
 		jsonc.Publish(natsRequestsSubject, request)
 	}
-
-	return
 
 	time.Sleep(b.config.WindowSize)
 

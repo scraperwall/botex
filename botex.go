@@ -24,6 +24,7 @@ type Botex struct {
 	natsSubscriptions []*nats.Subscription
 	resolver          *Resolver
 	history           *History
+	networks          *Networks
 	blocklist         *Blocklist
 	config            *Config
 	api               *API
@@ -31,27 +32,30 @@ type Botex struct {
 	ctx context.Context
 }
 
-// Idle does nothing
-func (b *Botex) Idle() bool {
-	return true
-}
-
 // HandleRequest handles incoming requests
 func (b *Botex) HandleRequest(r *Request) {
-	go func() {
-		ip := net.ParseIP(r.Source)
 
+	go func() {
 		if r.Timestamp < 1<<32 { // seconds
 			r.Time = time.Unix(r.Timestamp, 0)
 		} else { // nanoseconds
 			r.Time = time.Unix(0, r.Timestamp)
 		}
+
+		ip := net.ParseIP(r.Source)
+		r.ASN = b.config.ASNDB.Lookup(ip)
+
 		newIP := b.history.Add(r)
 		if newIP {
 			log.Tracef("enqueueing %s", ip)
 			b.resolver.Enqueue(NewIPResolv(ip))
 		}
+
+		if b.config.WithNetworks {
+			b.networks.HandleRequest(r)
+		}
 	}()
+
 }
 
 type natsAuth struct {
@@ -178,6 +182,13 @@ func New(ctx context.Context, config *Config) (*Botex, error) {
 	err = b.resolver.StartWorkers(resolvChan)
 	if err != nil {
 		return nil, err
+	}
+
+	// Networks
+	//
+	if config.WithNetworks {
+		log.Infof("enabling networka")
+		b.networks = NewNetworks(ctx, config)
 	}
 
 	// API
