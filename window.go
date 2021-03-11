@@ -1,11 +1,11 @@
 package botex
 
 import (
-	"context"
 	"sync"
 	"time"
 
 	"github.com/emirpasic/gods/maps/treemap"
+	log "github.com/sirupsen/logrus"
 )
 
 // Window implements a rolling window using a TreeMap as storage
@@ -18,15 +18,14 @@ type Window struct {
 }
 
 // NewWindow creates a new TreemapWindow instance with numWindows buckets that each cover a windowSize time range
-func NewWindow(ctx context.Context, windowSize time.Duration, numWindows int) *Window {
+// TODO: remove ctx as arg
+func NewWindow(windowSize time.Duration, numWindows int) *Window {
 	w := Window{
 		data:       treemap.NewWithIntComparator(),
 		mutex:      sync.RWMutex{},
 		windowSize: windowSize,
 		numWindows: numWindows,
 	}
-
-	go w.expire(ctx, windowSize)
 
 	return &w
 }
@@ -71,9 +70,11 @@ func (w *Window) keyFor(t time.Time) int {
 	return int(t.UnixNano() - t.UnixNano()%w.windowSize.Nanoseconds())
 }
 
-func (w *Window) removeExpired() {
+// Expire removes expired items from the window
+func (w *Window) Expire() int {
 	threshold := int(time.Now().Add(-1 * w.windowSize * time.Duration(w.numWindows)).UnixNano())
 
+	log.Tracef("window expire - threshold: %d, len: %d", threshold, w.data.Size())
 	w.mutex.Lock()
 	defer w.mutex.Unlock()
 
@@ -81,27 +82,13 @@ func (w *Window) removeExpired() {
 
 	for iter.Next() {
 		key := iter.Key().(int)
+		log.Tracef("window expire - diff: %d", key-threshold)
 		if key >= threshold {
-			return
+			break
 		}
 		w.data.Remove(key)
 	}
-}
 
-func (w *Window) expire(ctx context.Context, windowSize time.Duration) {
-	ticker := time.NewTicker(windowSize)
-
-	for {
-		select {
-		case <-ctx.Done():
-			ticker.Stop()
-			ticker = nil
-			w.mutex.Lock()
-			w.data = nil
-			w.mutex.Unlock()
-			return
-		case <-ticker.C:
-			w.removeExpired()
-		}
-	}
+	log.Tracef("window expire done - len: %d", w.data.Size())
+	return w.data.Size()
 }

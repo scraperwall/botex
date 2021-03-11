@@ -2,7 +2,6 @@ package botex
 
 import (
 	"container/list"
-	"context"
 	"sync"
 	"time"
 
@@ -19,23 +18,19 @@ type RequestsWindow struct {
 	windowSize time.Duration
 	numWindows int
 	mutex      sync.RWMutex
-	ctx        context.Context
 }
 
 // NewRequestsWindow creates a new RequestsWindow.
 // The app context and configuration get passed into the new item
-func NewRequestsWindow(ctx context.Context, config *Config) *RequestsWindow {
+func NewRequestsWindow(maxRequests int, windowSize time.Duration, numWindows int) *RequestsWindow {
 	rw := RequestsWindow{
 		data:       list.New(),
-		maxSize:    config.KeepRequests,
-		ttl:        config.WindowSize * time.Duration(config.NumWindows),
-		windowSize: config.WindowSize,
-		numWindows: config.NumWindows,
+		maxSize:    maxRequests,
+		ttl:        windowSize * time.Duration(numWindows),
+		windowSize: windowSize,
+		numWindows: numWindows,
 		mutex:      sync.RWMutex{},
-		ctx:        ctx,
 	}
-
-	go rw.cleanup()
 
 	return &rw
 }
@@ -71,15 +66,15 @@ func (rw *RequestsWindow) Len() int {
 	return rw.data.Len()
 }
 
-func (rw *RequestsWindow) expire() {
+// Expire removes expired requests from the window
+func (rw *RequestsWindow) Expire() int {
 	now := time.Now()
 
 	rw.mutex.Lock()
 	defer rw.mutex.Unlock()
 
 	if rw.data == nil || rw.data.Len() <= 0 {
-		log.Warn("data is empty")
-		return
+		return 0
 	}
 
 	for {
@@ -100,31 +95,6 @@ func (rw *RequestsWindow) expire() {
 		rw.data.Remove(oldest)
 		log.Tracef("expiring %s (%v) from requests (%d)", oldest.Value.(*Request).URL, now.Sub(oldest.Value.(*Request).Time), rw.Len())
 	}
-}
 
-func (rw *RequestsWindow) cleanup2() {
-	<-rw.ctx.Done()
-	if rw.data != nil {
-		rw.data.Init()
-		rw.data = nil
-	}
-}
-
-func (rw *RequestsWindow) cleanup() {
-	ticker := time.NewTicker(time.Minute)
-
-	for {
-		select {
-		case <-rw.ctx.Done():
-			if rw.data != nil {
-				rw.data.Init()
-				rw.data = nil
-			}
-			ticker.Stop()
-			ticker = nil
-			return
-		case <-ticker.C:
-			rw.expire()
-		}
-	}
+	return rw.data.Len()
 }

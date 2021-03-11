@@ -16,8 +16,7 @@ type History struct {
 	mutex      sync.RWMutex
 	windowSize time.Duration
 	numWindows int
-	removeChan chan net.IP
-	ctx        context.Context
+	updateChan chan IPStats
 }
 
 // NewHistory creates a new History item and passes on the context and configuration from its parent
@@ -27,30 +26,57 @@ func NewHistory(ctx context.Context, config *Config) *History {
 		data:       make(map[string]*IPData),
 		windowSize: config.WindowSize,
 		numWindows: config.NumWindows,
-		removeChan: make(chan net.IP),
+		updateChan: make(chan IPStats),
 		mutex:      sync.RWMutex{},
-		ctx:        ctx,
 	}
 
-	go h.removeEmptyIPs()
+	go func() {
+		ticker := time.NewTicker(config.WindowSize)
+
+		for {
+			select {
+			case <-ctx.Done():
+				ticker.Stop()
+				ticker = nil
+				return
+			case <-ticker.C:
+				h.expire()
+			case stats := <-h.updateChan:
+				// log.Infof("received IPStats for %s - total: %d, app: %d, other: %d, ratio: %.2f", stats.IP, stats.Total, stats.App, stats.Other, stats.Ratio)
+				h.update(stats)
+			}
+		}
+	}()
 
 	return &h
 }
 
-func (h *History) removeEmptyIPs() {
-	for {
-		select {
-		case <-h.ctx.Done():
-			close(h.removeChan)
-			return
-		case ip := <-h.removeChan:
-			h.mutex.Lock()
-			log.Tracef("removing %s from history", ip)
-			h.data[ip.String()].Stop()
-			h.data[ip.String()] = nil
-			delete(h.data, ip.String())
-			h.mutex.Unlock()
+func (h *History) expire() {
+	h.mutex.Lock()
+	defer h.mutex.Unlock()
+
+	for ip, ipd := range h.data {
+		if ipd.Requests.CanBeExpired() && ipd.Expire() <= 0 {
+			log.Tracef("IPData for %s is empty. Removing it.", ip)
+			delete(h.data, ip)
 		}
+	}
+}
+
+// update updates the cached stats for an IP
+func (h *History) update(stats IPStats) {
+	log.Tracef("History update before Lock()")
+
+	log.Tracef("History update before ipd.Update")
+	ipstr := stats.IP.String()
+	h.mutex.RLock()
+	ipd, ok := h.data[ipstr]
+	h.mutex.RUnlock()
+
+	if ok {
+		log.Tracef("History trying to update %s", ipd.IP)
+		ipd.Update(stats)
+		log.Tracef("History succeeded to update %s", ipd.IP)
 	}
 }
 
@@ -58,30 +84,43 @@ func (h *History) removeEmptyIPs() {
 // If Add has added a new item to the data map it returns true, otherwise it returns false
 func (h *History) Add(r *Request) bool {
 	newIP := false
-	h.mutex.Lock()
-	defer h.mutex.Unlock()
 
 	ip := net.ParseIP(r.Source)
 	ipstr := ip.String()
 
-	if _, ok := h.data[ip.String()]; !ok {
-		h.data[ipstr] = NewIPData(h.ctx, ip, h.removeChan, h.config)
+	h.mutex.Lock()
+	if _, ok := h.data[ipstr]; !ok {
+		h.data[ipstr] = NewIPData(h.updateChan, ip, h.config)
 		newIP = true
 	}
+	h.mutex.Unlock()
 
-	log.Tracef("%s - %s", time.Now().Sub(r.Time), r.URL)
-	h.data[ipstr].Add(r)
+	log.Tracef("history adding %s - %s", time.Now().Sub(r.Time), r.URL)
+
+	h.mutex.RLock()
+	ipd, ok := h.data[ipstr]
+	h.mutex.RUnlock()
+	if ok {
+		ipd.Add(r)
+	}
+
+	log.Tracef("history added %s %s", ipstr, r.URL)
 
 	return newIP
 }
 
 // SetHostname sets the reverse hotname for a given IP
 func (h *History) SetHostname(ip net.IP, hostname string) {
-	h.mutex.Lock()
-	defer h.mutex.Unlock()
+	log.Tracef("SetHostname %s %s", ip, hostname)
+	h.mutex.RLock()
+	log.Tracef("SetHostname lock acquired")
+	ipd, ok := h.data[ip.String()]
+	h.mutex.RUnlock()
 
-	if ipd, ok := h.data[ip.String()]; ok {
+	if ok {
+		log.Tracef("SetHostname before ipd.SetHostname")
 		ipd.SetHostname(hostname)
+		log.Tracef("SetHostname after ipd.SetHostname")
 	} else {
 		log.Warnf("history ipdata for %s (%s) is nil", ip, hostname)
 	}
@@ -92,7 +131,9 @@ func (h *History) Size() int {
 	h.mutex.RLock()
 	defer h.mutex.RUnlock()
 
-	return len(h.data)
+	l := len(h.data)
+
+	return l
 }
 
 // TotalStats returns the sum of the stats for all IPs
@@ -121,7 +162,9 @@ func (h *History) IPDetails(ip net.IP) *IPDetails {
 	h.mutex.RLock()
 	defer h.mutex.RUnlock()
 
-	return &h.data[ip.String()].IPDetails
+	ipd := &h.data[ip.String()].IPDetails
+
+	return ipd
 }
 
 // IPData returns the IPData struct for the given IP
@@ -129,5 +172,7 @@ func (h *History) IPData(ip net.IP) *IPData {
 	h.mutex.RLock()
 	defer h.mutex.RUnlock()
 
-	return h.data[ip.String()]
+	ipd := h.data[ip.String()]
+
+	return ipd
 }

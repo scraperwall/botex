@@ -1,7 +1,6 @@
 package botex
 
 import (
-	"context"
 	"fmt"
 	"testing"
 	"time"
@@ -10,14 +9,7 @@ import (
 )
 
 func TestRequestWindow(t *testing.T) {
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-
-	rw := NewRequestsWindow(ctx, &Config{
-		KeepRequests: 100,
-		WindowSize:   100 * time.Millisecond,
-		NumWindows:   5,
-	})
+	rw := NewRequestsWindow(100, 100, 5)
 
 	for i := 0; i < 130; i++ {
 		req := &Request{
@@ -40,7 +32,5 @@ func TestRequestWindow(t *testing.T) {
 		t.Errorf("RequestWindow should contain exactly 95 elements after one window has passed but has %d", rw.Len())
 	}
 
-	cancel()
 	log.Println(rw.data.Len())
-
 }

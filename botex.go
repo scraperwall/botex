@@ -34,28 +34,29 @@ type Botex struct {
 
 // HandleRequest handles incoming requests
 func (b *Botex) HandleRequest(r *Request) {
+	if r.Timestamp < 1<<32 { // seconds
+		r.Time = time.Unix(r.Timestamp, 0)
+	} else { // nanoseconds
+		r.Time = time.Unix(0, r.Timestamp)
+	}
 
-	go func() {
-		if r.Timestamp < 1<<32 { // seconds
-			r.Time = time.Unix(r.Timestamp, 0)
-		} else { // nanoseconds
-			r.Time = time.Unix(0, r.Timestamp)
-		}
+	ip := net.ParseIP(r.Source)
+	r.ASN = b.config.ASNDB.Lookup(ip)
 
-		ip := net.ParseIP(r.Source)
-		r.ASN = b.config.ASNDB.Lookup(ip)
+	log.Tracef("received %s - %s", ip, r.URL)
+	newIP := b.history.Add(r)
+	log.Tracef("added %s to history", ip)
 
-		newIP := b.history.Add(r)
-		if newIP {
-			log.Tracef("enqueueing %s", ip)
-			b.resolver.Enqueue(NewIPResolv(ip))
-		}
+	if newIP {
+		log.Tracef("enqueueing %s", ip)
+		b.resolver.Enqueue(NewIPResolv(ip))
+	}
 
-		if b.config.WithNetworks {
-			b.networks.HandleRequest(r)
-		}
-	}()
+	if b.config.WithNetworks {
+		b.networks.HandleRequest(r)
+	}
 
+	log.Trace("HandleRequest done")
 }
 
 type natsAuth struct {
@@ -265,6 +266,7 @@ func (b *Botex) blockWorker() {
 func (b *Botex) resolvWorker(resolvChan chan *IPResolv) {
 	count := 0
 
+OUTER:
 	for {
 		select {
 		case <-b.ctx.Done():
@@ -274,7 +276,7 @@ func (b *Botex) resolvWorker(resolvChan chan *IPResolv) {
 
 			if rip == nil {
 				log.Warn("rip is nil")
-				continue
+				continue OUTER
 			}
 			log.Tracef("[%d] ip %s resolved to %s", count, rip.IP, rip.Host)
 			if rip.Err == "" {
@@ -289,8 +291,8 @@ func (b *Botex) resolvWorker(resolvChan chan *IPResolv) {
 
 func (b *Botex) statsLogWorker() {
 	ticker := time.NewTicker(10 * time.Second)
+	log.Infof("starting statsLogWorker")
 	for {
-
 		select {
 		case <-b.ctx.Done():
 			ticker.Stop()

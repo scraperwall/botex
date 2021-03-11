@@ -8,7 +8,6 @@ import (
 	"strings"
 	"time"
 
-	nats "github.com/nats-io/nats.go"
 	"github.com/satyrius/gonx"
 	log "github.com/sirupsen/logrus"
 )
@@ -31,10 +30,12 @@ func (b *Botex) LogReplay(logfile, format string) {
 	fh.Seek(0, io.SeekStart)
 	scanner = bufio.NewScanner(fh)
 
-	jsonc, err := nats.NewEncodedConn(b.config.NatsConn, nats.JSON_ENCODER)
-	if err != nil {
-		log.Fatal(err)
-	}
+	/*
+		jsonc, err := nats.NewEncodedConn(b.config.NatsConn, nats.JSON_ENCODER)
+		if err != nil {
+			log.Fatal(err)
+		}
+	*/
 
 	tOffset := b.config.WindowSize * time.Duration(b.config.NumWindows)
 	tStart := time.Now().Add(-1 * tOffset)
@@ -104,7 +105,8 @@ func (b *Botex) LogReplay(logfile, format string) {
 
 		request.UserAgent, _ = logEntry.Field("http_user_agent")
 
-		jsonc.Publish(natsRequestsSubject, request)
+		b.HandleRequest(&request)
+		// jsonc.Publish(natsRequestsSubject, request)
 	}
 
 	time.Sleep(b.config.WindowSize)
@@ -164,17 +166,16 @@ func (b *Botex) LogReplay(logfile, format string) {
 
 			request := Request{
 				Source:    remote,
-				Timestamp: tStart.UnixNano(),
+				Timestamp: time.Now().UnixNano(),
 				URL:       reqData[2],
 				Host:      "scw.test",
 				Method:    reqData[1],
 			}
 
-			tStart = tStart.Add(time.Duration(timePerLine))
-
 			request.UserAgent, _ = logEntry.Field("http_user_agent")
 
-			jsonc.Publish(natsRequestsSubject, request)
+			b.HandleRequest(&request)
+			//jsonc.Publish(natsRequestsSubject, request)
 			time.Sleep(timePerLine)
 		}
 	}

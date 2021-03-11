@@ -1,7 +1,6 @@
 package botex
 
 import (
-	"context"
 	"sync"
 	"time"
 )
@@ -12,21 +11,17 @@ type MapWindow struct {
 	numWindows int
 	data       map[string]*Window
 	mutex      sync.RWMutex
-	ctx        context.Context
 }
 
 // NewMapWindow creates a new MapWindow. windowSize determines the size of each window, numWindows how many windows there should be
 // The context of the parent gets passed on to the new instance
-func NewMapWindow(ctx context.Context, windowSize time.Duration, numWindows int) *MapWindow {
+func NewMapWindow(windowSize time.Duration, numWindows int) *MapWindow {
 	mw := MapWindow{
 		windowSize: windowSize,
 		numWindows: numWindows,
 		data:       make(map[string]*Window),
 		mutex:      sync.RWMutex{},
-		ctx:        ctx,
 	}
-
-	go mw.cleanup()
 
 	return &mw
 }
@@ -37,7 +32,7 @@ func (mw *MapWindow) Add(req *Request) {
 	defer mw.mutex.Unlock()
 
 	if _, ok := mw.data[req.UserAgent]; !ok {
-		mw.data[req.UserAgent] = NewWindow(mw.ctx, mw.windowSize, mw.numWindows)
+		mw.data[req.UserAgent] = NewWindow(mw.windowSize, mw.numWindows)
 	}
 
 	mw.data[req.UserAgent].Add(req.Time)
@@ -79,24 +74,20 @@ func (mw *MapWindow) Size() int {
 	return len(mw.data)
 }
 
-func (mw *MapWindow) cleanup() {
-	ticker := time.NewTicker(mw.windowSize)
+// Expire removes expired items
+func (mw *MapWindow) Expire() int {
+	mw.mutex.Lock()
+	defer mw.mutex.Unlock()
 
-	for {
-		select {
-		case <-mw.ctx.Done():
-			ticker.Stop()
-			ticker = nil
-			mw.data = nil
-			return
-		case <-ticker.C:
-			mw.mutex.Lock()
-			for ua, window := range mw.data {
-				if window.Count() <= 0 {
-					delete(mw.data, ua)
-				}
-			}
-			mw.mutex.Unlock()
+	count := 0
+
+	for k, w := range mw.data {
+		size := w.Expire()
+		if size <= 0 {
+			delete(mw.data, k)
 		}
+		count += size
 	}
+
+	return count
 }

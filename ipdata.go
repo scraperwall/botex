@@ -1,7 +1,6 @@
 package botex
 
 import (
-	"context"
 	"fmt"
 	"net"
 	"sync"
@@ -14,6 +13,7 @@ import (
 
 // IPStats contains aggregated statistics about a single IP
 type IPStats struct {
+	IP           net.IP
 	Total        int
 	App          int
 	Other        int
@@ -44,27 +44,18 @@ type IPDetails struct {
 // It handles updating the aggregated stats when it receives new requests
 type IPData struct {
 	IPDetails
+	Requests   *Requests
+	updateChan chan IPStats
 
 	config *Config
-
-	updateChan chan IPStats
-	removeChan chan net.IP
-	Requests   *Requests
-
 	mutex  sync.RWMutex
-	ctx    context.Context
-	cancel context.CancelFunc
 }
 
 // NewIPData creates a new IPData item fro a given IP.
 // the parent context and app configuration are passed on from the parent
-func NewIPData(ctx context.Context, ip net.IP, removeChan chan net.IP, config *Config) *IPData {
+func NewIPData(updateChan chan IPStats, ip net.IP, config *Config) *IPData {
 	asn := config.ASNDB.Lookup(ip)
 	geo, _ := config.GEOIPDB.Lookup(ip)
-
-	updateChan := make(chan IPStats)
-
-	myctx, mycancel := context.WithCancel(ctx)
 
 	ipd := &IPData{
 		IPDetails: IPDetails{
@@ -81,14 +72,9 @@ func NewIPData(ctx context.Context, ip net.IP, removeChan chan net.IP, config *C
 		},
 		config:     config,
 		updateChan: updateChan,
-		removeChan: removeChan,
 		mutex:      sync.RWMutex{},
-		Requests:   NewRequests(ctx, config, updateChan),
-		ctx:        myctx,
-		cancel:     mycancel,
+		Requests:   NewRequests(ip, updateChan, config),
 	}
-
-	go ipd.updateStats()
 
 	return ipd
 }
@@ -99,16 +85,31 @@ func (ipd *IPData) Add(r *Request) {
 	ipd.Requests.Add(r)
 }
 
+// Update sets the cached statistics numbers using an IPStats item
+func (ipd *IPData) Update(stats IPStats) {
+	ipd.Total = stats.Total
+	ipd.App = stats.App
+	ipd.Other = stats.Other
+	ipd.Ratio = stats.Ratio
+
+	if ipd.ShouldBeBlocked() {
+		now := time.Now()
+		if ipd.LastBlockAt.Add(ipd.config.BlockTTL).Before(now) {
+			ipd.LastBlockAt = now
+			ipd.config.BlockChan <- &ipd.IPDetails
+		}
+	}
+}
+
 // SetHostname sets the reverse hostname for an IP
 func (ipd *IPData) SetHostname(hostname string) {
 	if ipd == nil {
 		log.Warn("ipd is nil")
 		return
 	}
-	ipd.mutex.Lock()
 	ipd.Hostname = hostname
-	ipd.mutex.Unlock()
 	ipd.updateChan <- IPStats{
+		IP:    ipd.IP,
 		Total: ipd.Total,
 		App:   ipd.App,
 		Other: ipd.Other,
@@ -151,43 +152,7 @@ func (ipd *IPData) ShouldBeBlocked() bool {
 	return false
 }
 
-// Stop signals that this intance is no longer needed an can self-destruct
-func (ipd *IPData) Stop() {
-	if ipd != nil {
-		ipd.cancel()
-	}
-}
-
-func (ipd *IPData) updateStats() {
-	for {
-		select {
-		case <-ipd.ctx.Done():
-			ipd.IP = nil
-			ipd.ASN = nil
-			ipd.GeoIP = nil
-			return
-		case stats := <-ipd.updateChan:
-			ipd.Total = stats.Total
-			ipd.App = stats.App
-			ipd.Other = stats.Other
-			ipd.Ratio = stats.Ratio
-
-			if ipd.Total <= 0 && ipd.CreatedAt.Add(ipd.config.WindowSize).Before(time.Now()) {
-				close(ipd.updateChan)
-				ipd.Requests.Stop()
-				ipd.Requests = nil
-				log.Tracef("marking %s to be removed", ipd.IP)
-				ipd.removeChan <- ipd.IP
-				return
-			}
-
-			if ipd.ShouldBeBlocked() {
-				now := time.Now()
-				if ipd.LastBlockAt.Add(ipd.config.BlockTTL).Before(now) {
-					ipd.LastBlockAt = time.Now()
-					ipd.config.BlockChan <- &ipd.IPDetails
-				}
-			}
-		}
-	}
+// Expire removes all expired requests
+func (ipd *IPData) Expire() int {
+	return ipd.Requests.Expire()
 }
