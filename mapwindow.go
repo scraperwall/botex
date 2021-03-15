@@ -3,6 +3,8 @@ package botex
 import (
 	"sync"
 	"time"
+
+	"github.com/scraperwall/botex/data"
 )
 
 // MapWindow is a map that contains a rolling.TimePolicy for each entry
@@ -27,7 +29,7 @@ func NewMapWindow(windowSize time.Duration, numWindows int) *MapWindow {
 }
 
 // Add adds one item for the given key
-func (mw *MapWindow) Add(req *Request) {
+func (mw *MapWindow) Add(req *data.Request) {
 	mw.mutex.Lock()
 	defer mw.mutex.Unlock()
 

@@ -1,13 +1,19 @@
-package botex
+package plugins
 
 import (
 	"context"
+	"fmt"
 	"net"
+	"net/http"
 	"sync"
 	"time"
 
 	"github.com/emirpasic/gods/maps/treemap"
+	"github.com/gin-gonic/gin"
 	"github.com/scraperwall/asndb/v2"
+	"github.com/scraperwall/botex/config"
+	"github.com/scraperwall/botex/data"
+	"github.com/scraperwall/botex/matchers"
 	log "github.com/sirupsen/logrus"
 )
 
@@ -18,7 +24,7 @@ type Networks struct {
 	removeChan chan *net.IPNet
 	windowSize time.Duration
 	numWindows int
-	config     *Config
+	config     *config.Config
 	ctx        context.Context
 }
 
@@ -45,7 +51,7 @@ type NetworkData struct {
 }
 
 // NewNetworkData creates a new NetworkData instance
-func NewNetworkData(ctx context.Context, ipnet *net.IPNet, removeChan chan *net.IPNet, config *Config) *NetworkData {
+func NewNetworkData(ctx context.Context, ipnet *net.IPNet, removeChan chan *net.IPNet, config *config.Config) *NetworkData {
 	nd := &NetworkData{
 		Network:     ipnet,
 		Total:       0,
@@ -87,7 +93,7 @@ func NewNetworkData(ctx context.Context, ipnet *net.IPNet, removeChan chan *net.
 }
 
 // HandleRequest adds an item to the NetworkData instance
-func (nd *NetworkData) HandleRequest(r *Request) {
+func (nd *NetworkData) HandleRequest(r *data.Request) {
 	if nd.ASN == nil {
 		nd.ASN = r.ASN
 	}
@@ -96,7 +102,7 @@ func (nd *NetworkData) HandleRequest(r *Request) {
 	var val int64
 
 	stats := nd.appMap
-	if assetRegexp.MatchString(r.URL) {
+	if matchers.Assets.MatchString(r.URL) {
 		stats = nd.otherMap
 	}
 
@@ -196,7 +202,7 @@ func (nd *NetworkData) expire() {
 }
 
 // NewNetworks creates a new Networks instance
-func NewNetworks(ctx context.Context, config *Config) *Networks {
+func NewNetworks(ctx context.Context, config *config.Config) *Networks {
 	n := Networks{
 		data:       make(map[string]*NetworkData),
 		mutex:      sync.RWMutex{},
@@ -241,7 +247,9 @@ func (n *Networks) Remove(network *net.IPNet) {
 }
 
 // HandleRequest handles a request and saves it into the network data
-func (n *Networks) HandleRequest(r *Request) {
+func (n *Networks) HandleRequest(r *data.Request) (cont bool) {
+	cont = true
+
 	log.Tracef("networks adding %s - %s (%d)", r.Source, r.ASN.Network, len(n.data))
 
 	cidr := r.ASN.Network.String()
@@ -253,6 +261,8 @@ func (n *Networks) HandleRequest(r *Request) {
 
 	n.data[cidr].HandleRequest(r)
 	n.mutex.Unlock()
+
+	return true
 }
 
 // Count returns the number of networks
@@ -290,11 +300,11 @@ func (n *Networks) Get(ipn *net.IPNet) (nd *NetworkData, found bool) {
 }
 
 // Averages returns the average of requests across all networks
-func (n *Networks) Averages() IPStats {
+func (n *Networks) Averages() data.IPStats {
 	n.mutex.RLock()
 	defer n.mutex.RUnlock()
 
-	res := IPStats{}
+	res := data.IPStats{}
 
 	count := 0
 
@@ -315,6 +325,18 @@ func (n *Networks) Averages() IPStats {
 	return res
 }
 
+func (n *Networks) APIHooks(r *gin.Engine) {
+	r.GET("/networks", n.apiGetNetworks)
+	r.GET("/network/:ip/:bits", n.apiGetNetwork)
+}
+
+func (n *Networks) ShouldBeBlocked(ipd data.IPStats) (block, next bool) {
+	block = false
+	next = true
+
+	return false, true
+}
+
 func (n *Networks) expire() {
 	n.mutex.RLock()
 	defer n.mutex.RUnlock()
@@ -327,4 +349,24 @@ func (n *Networks) expire() {
 func (n *Networks) logStats() {
 	avgs := n.Averages()
 	log.Infof("networks: %d, total: %d, app: %d, other: %d, ratio: %.2f", n.Count(), avgs.Total, avgs.App, avgs.Other, avgs.Ratio)
+}
+
+func (n *Networks) apiGetNetworks(c *gin.Context) {
+	c.JSON(http.StatusOK, n.All())
+}
+
+func (n *Networks) apiGetNetwork(c *gin.Context) {
+	_, network, err := net.ParseCIDR(fmt.Sprintf("%s/%s", c.Param("ip"), c.Param("bits")))
+	if err != nil {
+		c.AbortWithStatusJSON(http.StatusNotAcceptable, gin.H{"error": fmt.Sprintf("%s is not a valid network in CIDR notation", c.Param("cidr"))})
+		return
+	}
+	log.Infof("getting network %s", network)
+	nw, ok := n.Get(network)
+	if !ok {
+		c.AbortWithStatusJSON(http.StatusNotFound, gin.H{})
+		return
+	}
+
+	c.JSON(http.StatusOK, nw)
 }

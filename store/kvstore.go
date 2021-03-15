@@ -1,4 +1,4 @@
-package botex
+package store
 
 import (
 	"time"

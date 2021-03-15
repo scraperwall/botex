@@ -13,6 +13,9 @@ import (
 	natsd "github.com/nats-io/nats-server/v2/server"
 	nats "github.com/nats-io/nats.go"
 	"github.com/scraperwall/asndb/v2"
+	"github.com/scraperwall/botex/config"
+	"github.com/scraperwall/botex/data"
+	"github.com/scraperwall/botex/plugins"
 	"github.com/scraperwall/geoip/v2"
 	log "github.com/sirupsen/logrus"
 )
@@ -22,18 +25,19 @@ const natsRequestsSubject = "requests"
 // Botex detects bad bots
 type Botex struct {
 	natsSubscriptions []*nats.Subscription
-	resolver          *Resolver
-	history           *History
-	networks          *Networks
-	blocklist         *Blocklist
-	config            *Config
-	api               *API
+
+	history   *History
+	blocklist *Blocklist
+	config    *config.Config
+	resources *Resources
+	api       *API
+	plugins   []Plugin
 
 	ctx context.Context
 }
 
 // HandleRequest handles incoming requests
-func (b *Botex) HandleRequest(r *Request) {
+func (b *Botex) HandleRequest(r *data.Request) {
 	if r.Timestamp < 1<<32 { // seconds
 		r.Time = time.Unix(r.Timestamp, 0)
 	} else { // nanoseconds
@@ -41,20 +45,22 @@ func (b *Botex) HandleRequest(r *Request) {
 	}
 
 	ip := net.ParseIP(r.Source)
-	r.ASN = b.config.ASNDB.Lookup(ip)
 
 	log.Tracef("received %s - %s", ip, r.URL)
 	newIP := b.history.Add(r)
 	log.Tracef("added %s to history", ip)
 
 	if newIP {
-		log.Tracef("enqueueing %s", ip)
-		b.resolver.Enqueue(NewIPResolv(ip))
+		r.ASN = b.resources.ASNDB.Lookup(ip)
+		// log.Tracef("enqueueing %s", ip)
+		// b.resolver.Enqueue(NewIPResolv(ip))
 	}
 
-	if b.config.WithNetworks {
-		b.networks.HandleRequest(r)
-	}
+	go func() {
+		for _, p := range b.plugins {
+			p.HandleRequest(r)
+		}
+	}()
 
 	log.Trace("HandleRequest done")
 }
@@ -69,31 +75,34 @@ func (na *natsAuth) Check(c natsd.ClientAuthentication) bool {
 }
 
 // New creates a new Botex instance
-func New(ctx context.Context, config *Config) (*Botex, error) {
+func New(ctx context.Context, config *config.Config) (*Botex, error) {
 	var err error
 
 	blocklistRecheckChan := make(chan bool)
+	resources := NewResources()
 
 	b := &Botex{
 		config:            config,
-		blocklist:         NewBlocklist(ctx, blocklistRecheckChan, config),
+		resources:         resources,
+		blocklist:         NewBlocklist(ctx, blocklistRecheckChan, resources, config.BlockTTL),
 		natsSubscriptions: make([]*nats.Subscription, 0),
+		plugins:           make([]Plugin, 0),
 		ctx:               ctx,
 	}
 
-	b.config.BlockChan = make(chan *IPDetails, 100)
+	b.resources.BlockChan = make(chan *IPDetails, 100)
 
 	// ASN Database
 	//
-	config.ASNDB, err = asndb.New(config.ASNDBFile)
+	b.resources.ASNDB, err = asndb.New(config.ASNDBFile)
 	if err != nil {
 		log.Fatal(err)
 	}
-	log.Infof("asndb loaded with %d records", config.ASNDB.Size())
+	log.Infof("asndb loaded with %d records", b.resources.ASNDB.Size())
 
 	// GeoIP Database
 	//
-	config.GEOIPDB, err = geoip.New(config.GeoIPDBFile)
+	b.resources.GEOIPDB, err = geoip.New(config.GeoIPDBFile)
 	if err != nil {
 		return nil, err
 	}
@@ -114,10 +123,10 @@ func New(ctx context.Context, config *Config) (*Botex, error) {
 		TraceVerbose: true,
 	}
 
-	config.NatsServer = natsd.New(nopts)
-	go config.NatsServer.Start()
-	if !config.NatsServer.ReadyForConnections(2 * time.Second) {
-		config.NatsServer.Shutdown()
+	b.resources.NatsServer = natsd.New(nopts)
+	go b.resources.NatsServer.Start()
+	if !b.resources.NatsServer.ReadyForConnections(2 * time.Second) {
+		b.resources.NatsServer.Shutdown()
 		return nil, errors.New("nats server failed to startup")
 	}
 
@@ -131,21 +140,21 @@ func New(ctx context.Context, config *Config) (*Botex, error) {
 
 		log.Warnf("nats error: %s del: %d / drop: %d / pend: %d/%d / err: %v", s.Subject, delivered, dropped, pnum, psize, err)
 	}
-	config.NatsConn, err = nats.Connect(fmt.Sprintf("nats://127.0.0.1:%d/", config.NatsPort), nats.ErrorHandler(natsSlowLogFunc), nats.UserInfo(config.NatsUser, config.NatsPassword))
+	b.resources.NatsConn, err = nats.Connect(fmt.Sprintf("nats://127.0.0.1:%d/", config.NatsPort), nats.ErrorHandler(natsSlowLogFunc), nats.UserInfo(config.NatsUser, config.NatsPassword))
 	if err != nil {
-		config.NatsServer.Shutdown()
+		b.resources.NatsServer.Shutdown()
 		return nil, err
 	}
 
-	jsonc, err := nats.NewEncodedConn(config.NatsConn, nats.JSON_ENCODER)
+	jsonc, err := nats.NewEncodedConn(b.resources.NatsConn, nats.JSON_ENCODER)
 	if err != nil {
-		b.config.NatsServer.Shutdown()
+		b.resources.NatsServer.Shutdown()
 		return nil, err
 	}
 
 	reqSubscription, err := jsonc.Subscribe(natsRequestsSubject, b.HandleRequest)
 	if err != nil {
-		b.config.NatsServer.Shutdown()
+		b.resources.NatsServer.Shutdown()
 		return nil, err
 	}
 	reqSubscription.SetPendingLimits(200000, 10*1024*1024*1024) // 200.000 messages or 10GB
@@ -156,31 +165,31 @@ func New(ctx context.Context, config *Config) (*Botex, error) {
 	//
 	bopts := badger.DefaultOptions(config.BadgerPath)
 	bopts.SyncWrites = true
-	config.KVStore, err = NewBadgerDB(ctx, config.BadgerPath)
+	b.resources.KVStore, err = NewBadgerDB(ctx, config.BadgerPath)
 	if err != nil {
 		return nil, err
 	}
 
 	// Whitelist
 	//
-	config.Whitelist, err = NewWhitelist(ctx, blocklistRecheckChan, config)
+	b.resources.Whitelist, err = NewWhitelist(ctx, blocklistRecheckChan, config)
 	if err != nil {
 		log.Fatal(err)
 	}
 
 	// History
 	//
-	b.history = NewHistory(ctx, config)
+	b.history = NewHistory(ctx, b.resources, config)
 
 	// Resolver
 	//
-	b.resolver, err = NewResolver(ctx, config)
+	b.resources.Resolver, err = NewResolver(ctx, b.resources, config)
 	if err != nil {
 		return nil, err
 	}
 
 	resolvChan := make(chan *IPResolv, 2000)
-	err = b.resolver.StartWorkers(resolvChan)
+	err = b.resources.Resolver.StartWorkers(resolvChan)
 	if err != nil {
 		return nil, err
 	}
@@ -189,7 +198,7 @@ func New(ctx context.Context, config *Config) (*Botex, error) {
 	//
 	if config.WithNetworks {
 		log.Infof("enabling networka")
-		b.networks = NewNetworks(ctx, config)
+		b.Use(plugins.NewNetworks(ctx, config))
 	}
 
 	// API
@@ -214,12 +223,17 @@ func New(ctx context.Context, config *Config) (*Botex, error) {
 		for _, subscr := range b.natsSubscriptions {
 			subscr.Drain()
 		}
-		b.config.NatsServer.Shutdown()
-		b.config.NatsConn.Drain()
-		b.config.KVStore.Close()
+		b.resources.NatsServer.Shutdown()
+		b.resources.NatsConn.Drain()
+		b.resources.KVStore.Close()
 	}()
 
 	return b, nil
+}
+
+// Use adds a plugin to botex
+func (b *Botex) Use(p Plugin) {
+	b.plugins = append(b.plugins, p)
 }
 
 func (b *Botex) logMemoryStats(ctx context.Context) {
@@ -255,7 +269,7 @@ func (b *Botex) blockWorker() {
 		select {
 		case <-b.ctx.Done():
 			return
-		case block := <-b.config.BlockChan:
+		case block := <-b.resources.BlockChan:
 			if err := b.blocklist.Block(block); err != nil {
 				log.Errorf("failed to write blocked IP %s to kvstore: %s", block.IP, err)
 			}

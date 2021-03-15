@@ -6,27 +6,31 @@ import (
 	"sync"
 	"time"
 
+	"github.com/scraperwall/botex/config"
+	"github.com/scraperwall/botex/data"
 	log "github.com/sirupsen/logrus"
 )
 
 // History is the history of all IPs for which the application has received a request
 type History struct {
-	config     *Config
+	config     *config.Config
+	resources  *Resources
 	data       map[string]*IPData
 	mutex      sync.RWMutex
 	windowSize time.Duration
 	numWindows int
-	updateChan chan IPStats
+	updateChan chan data.IPStats
 }
 
 // NewHistory creates a new History item and passes on the context and configuration from its parent
-func NewHistory(ctx context.Context, config *Config) *History {
+func NewHistory(ctx context.Context, resources *Resources, config *config.Config) *History {
 	h := History{
 		config:     config,
+		resources:  resources,
 		data:       make(map[string]*IPData),
 		windowSize: config.WindowSize,
 		numWindows: config.NumWindows,
-		updateChan: make(chan IPStats),
+		updateChan: make(chan data.IPStats),
 		mutex:      sync.RWMutex{},
 	}
 
@@ -64,7 +68,7 @@ func (h *History) expire() {
 }
 
 // update updates the cached stats for an IP
-func (h *History) update(stats IPStats) {
+func (h *History) update(stats data.IPStats) {
 	log.Tracef("History update before Lock()")
 
 	log.Tracef("History update before ipd.Update")
@@ -82,7 +86,7 @@ func (h *History) update(stats IPStats) {
 
 // Add adds a single HTTP request to the history
 // If Add has added a new item to the data map it returns true, otherwise it returns false
-func (h *History) Add(r *Request) bool {
+func (h *History) Add(r *data.Request) bool {
 	newIP := false
 
 	ip := net.ParseIP(r.Source)
@@ -90,7 +94,7 @@ func (h *History) Add(r *Request) bool {
 
 	h.mutex.Lock()
 	if _, ok := h.data[ipstr]; !ok {
-		h.data[ipstr] = NewIPData(h.updateChan, ip, h.config)
+		h.data[ipstr] = NewIPData(h.updateChan, ip, h.resources, h.config)
 		newIP = true
 	}
 	h.mutex.Unlock()
@@ -137,8 +141,8 @@ func (h *History) Size() int {
 }
 
 // TotalStats returns the sum of the stats for all IPs
-func (h *History) TotalStats() IPStats {
-	stats := IPStats{}
+func (h *History) TotalStats() data.IPStats {
+	stats := data.IPStats{}
 
 	h.mutex.RLock()
 	defer h.mutex.RUnlock()

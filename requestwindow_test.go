@@ -5,6 +5,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/scraperwall/botex/data"
 	log "github.com/sirupsen/logrus"
 )
 
@@ -12,7 +13,7 @@ func TestRequestWindow(t *testing.T) {
 	rw := NewRequestsWindow(100, 100, 5)
 
 	for i := 0; i < 130; i++ {
-		req := &Request{
+		req := &data.Request{
 			UserAgent: "test/1.0",
 			Host:      "test.scw",
 			Time:      time.Now(),

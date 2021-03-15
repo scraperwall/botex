@@ -1,12 +1,7 @@
-package botex
+package config
 
 import (
 	"time"
-
-	natsd "github.com/nats-io/nats-server/v2/server"
-	"github.com/nats-io/nats.go"
-	"github.com/scraperwall/asndb/v2"
-	"github.com/scraperwall/geoip/v2"
 )
 
 // Config contains all configurable bits and pieces the botex application needs
@@ -38,13 +33,4 @@ type Config struct {
 	LogMemoryStats  bool
 	WhitelistTOML   string
 	WithNetworks    bool
-
-	ASNDB      *asndb.DB
-	GEOIPDB    *geoip.DB
-	NatsServer *natsd.Server
-	NatsConn   *nats.Conn
-	KVStore    KVStore
-	Whitelist  *Whitelist
-
-	BlockChan chan *IPDetails
 }

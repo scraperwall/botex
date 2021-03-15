@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/satyrius/gonx"
+	"github.com/scraperwall/botex/data"
 	log "github.com/sirupsen/logrus"
 )
 
@@ -93,7 +94,7 @@ func (b *Botex) LogReplay(logfile, format string) {
 			continue
 		}
 
-		request := Request{
+		request := data.Request{
 			Source:    remote,
 			Timestamp: tStart.UnixNano(),
 			URL:       reqData[2],
@@ -164,7 +165,7 @@ func (b *Botex) LogReplay(logfile, format string) {
 				continue
 			}
 
-			request := Request{
+			request := data.Request{
 				Source:    remote,
 				Timestamp: time.Now().UnixNano(),
 				URL:       reqData[2],

@@ -3,7 +3,6 @@ package botex
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 	"net"
 	"net/http"
 	"sort"
@@ -11,19 +10,22 @@ import (
 	"github.com/fvbock/endless"
 	"github.com/gin-contrib/cors"
 	"github.com/gin-gonic/gin"
+	"github.com/scraperwall/botex/config"
+	"github.com/scraperwall/botex/data"
 	log "github.com/sirupsen/logrus"
 )
 
 // API provides the HTTP REST API for botex
 type API struct {
-	botex  *Botex
-	engine *gin.Engine
-	config *Config
-	ctx    context.Context
+	botex     *Botex
+	engine    *gin.Engine
+	config    *config.Config
+	resources *Resources
+	ctx       context.Context
 }
 
 // NewAPI creates a new REST-API for botex
-func NewAPI(ctx context.Context, config *Config, botex *Botex) (api *API, err error) {
+func NewAPI(ctx context.Context, config *config.Config, botex *Botex) (api *API, err error) {
 	api = &API{
 		config: config,
 		ctx:    ctx,
@@ -43,39 +45,20 @@ func (a *API) run() {
 	a.engine = r
 	r.GET("/blocked", a.getBlocked)
 	r.GET("/ip/:ip", a.getIP)
-	if a.config.WithNetworks {
-		r.GET("/networks", a.getNetworks)
-		r.GET("/network/:ip/:bits", a.getNetwork)
-	}
+	/*
+		if a.config.WithNetworks {
+			r.GET("/networks", a.getNetworks)
+			r.GET("/network/:ip/:bits", a.getNetwork)
+		}
+	*/
 
 	endless.ListenAndServe(a.config.APIAddress, r)
 }
 
-func (a *API) getNetworks(c *gin.Context) {
-	c.JSON(http.StatusOK, a.botex.networks.All())
-}
-
-func (a *API) getNetwork(c *gin.Context) {
-	_, network, err := net.ParseCIDR(fmt.Sprintf("%s/%s", c.Param("ip"), c.Param("bits")))
-	if err != nil {
-		c.AbortWithStatusJSON(http.StatusNotAcceptable, gin.H{"error": fmt.Sprintf("%s is not a valid network in CIDR notation", c.Param("cidr"))})
-		return
-	}
-	log.Infof("getting network %s", network)
-	n, ok := a.botex.networks.Get(network)
-	if !ok {
-		c.AbortWithStatusJSON(http.StatusNotFound, gin.H{})
-		return
-	}
-
-	c.JSON(http.StatusOK, n)
-}
-
 func (a *API) getBlocked(c *gin.Context) {
-
 	blocked := make([]IPDetails, 0)
 
-	err := a.botex.blocklist.config.KVStore.Each([]byte(blockNamespace), []byte{}, func(v []byte) {
+	err := a.botex.resources.KVStore.Each([]byte(blockNamespace), []byte{}, func(v []byte) {
 		var ipd IPDetails
 		err := json.Unmarshal(v, &ipd)
 		blocked = append(blocked, ipd)
@@ -105,7 +88,7 @@ func (a *API) getIP(c *gin.Context) {
 
 	var data struct {
 		IPDetails  *IPDetails
-		Requests   []*Request
+		Requests   []*data.Request
 		Useragents map[string]int
 	}
 

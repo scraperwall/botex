@@ -5,6 +5,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/scraperwall/botex/data"
 	log "github.com/sirupsen/logrus"
 )
 
@@ -36,7 +37,7 @@ func NewRequestsWindow(maxRequests int, windowSize time.Duration, numWindows int
 }
 
 // Add adds a single request
-func (rw *RequestsWindow) Add(r *Request) {
+func (rw *RequestsWindow) Add(r *data.Request) {
 	rw.mutex.Lock()
 	defer rw.mutex.Unlock()
 
@@ -47,14 +48,14 @@ func (rw *RequestsWindow) Add(r *Request) {
 }
 
 // Requests returns an array of all requests in the list
-func (rw *RequestsWindow) Requests() []*Request {
+func (rw *RequestsWindow) Requests() []*data.Request {
 	rw.mutex.Lock()
 	defer rw.mutex.Unlock()
-	reqs := make([]*Request, rw.data.Len())
+	reqs := make([]*data.Request, rw.data.Len())
 
 	i := 0
 	for e := rw.data.Front(); e != nil; e = e.Next() {
-		reqs[i] = e.Value.(*Request)
+		reqs[i] = e.Value.(*data.Request)
 		i++
 	}
 
@@ -88,12 +89,12 @@ func (rw *RequestsWindow) Expire() int {
 			break
 		}
 
-		if tDiff := now.Sub(oldest.Value.(*Request).Time); tDiff <= rw.ttl {
+		if tDiff := now.Sub(oldest.Value.(*data.Request).Time); tDiff <= rw.ttl {
 			break
 		}
 
 		rw.data.Remove(oldest)
-		log.Tracef("expiring %s (%v) from requests (%d)", oldest.Value.(*Request).URL, now.Sub(oldest.Value.(*Request).Time), rw.Len())
+		log.Tracef("expiring %s (%v) from requests (%d)", oldest.Value.(*data.Request).URL, now.Sub(oldest.Value.(*data.Request).Time), rw.Len())
 	}
 
 	return rw.data.Len()

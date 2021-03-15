@@ -7,19 +7,11 @@ import (
 	"time"
 
 	"github.com/scraperwall/asndb/v2"
+	"github.com/scraperwall/botex/config"
+	"github.com/scraperwall/botex/data"
 	"github.com/scraperwall/geoip/v2"
 	log "github.com/sirupsen/logrus"
 )
-
-// IPStats contains aggregated statistics about a single IP
-type IPStats struct {
-	IP           net.IP
-	Total        int
-	App          int
-	Other        int
-	Ratio        float64
-	WithHostname int
-}
 
 // IPDetails contains meta information about an IP, its aggregated statistics and a reason for why it was blocked
 type IPDetails struct {
@@ -45,17 +37,18 @@ type IPDetails struct {
 type IPData struct {
 	IPDetails
 	Requests   *Requests
-	updateChan chan IPStats
+	updateChan chan data.IPStats
 
-	config *Config
-	mutex  sync.RWMutex
+	resources *Resources
+	config    *config.Config
+	mutex     sync.RWMutex
 }
 
 // NewIPData creates a new IPData item fro a given IP.
 // the parent context and app configuration are passed on from the parent
-func NewIPData(updateChan chan IPStats, ip net.IP, config *Config) *IPData {
-	asn := config.ASNDB.Lookup(ip)
-	geo, _ := config.GEOIPDB.Lookup(ip)
+func NewIPData(updateChan chan data.IPStats, ip net.IP, resources *Resources, config *config.Config) *IPData {
+	asn := resources.ASNDB.Lookup(ip)
+	geo, _ := resources.GEOIPDB.Lookup(ip)
 
 	ipd := &IPData{
 		IPDetails: IPDetails{
@@ -70,6 +63,7 @@ func NewIPData(updateChan chan IPStats, ip net.IP, config *Config) *IPData {
 			CreatedAt: time.Now(),
 			UpdatedAt: time.Unix(0, 0),
 		},
+		resources:  resources,
 		config:     config,
 		updateChan: updateChan,
 		mutex:      sync.RWMutex{},
@@ -80,13 +74,13 @@ func NewIPData(updateChan chan IPStats, ip net.IP, config *Config) *IPData {
 }
 
 // Add adds a single HTTP request
-func (ipd *IPData) Add(r *Request) {
+func (ipd *IPData) Add(r *data.Request) {
 	ipd.UpdatedAt = time.Now()
 	ipd.Requests.Add(r)
 }
 
 // Update sets the cached statistics numbers using an IPStats item
-func (ipd *IPData) Update(stats IPStats) {
+func (ipd *IPData) Update(stats data.IPStats) {
 	ipd.Total = stats.Total
 	ipd.App = stats.App
 	ipd.Other = stats.Other
@@ -96,7 +90,7 @@ func (ipd *IPData) Update(stats IPStats) {
 		now := time.Now()
 		if ipd.LastBlockAt.Add(ipd.config.BlockTTL).Before(now) {
 			ipd.LastBlockAt = now
-			ipd.config.BlockChan <- &ipd.IPDetails
+			ipd.resources.BlockChan <- &ipd.IPDetails
 		}
 	}
 }
@@ -108,7 +102,7 @@ func (ipd *IPData) SetHostname(hostname string) {
 		return
 	}
 	ipd.Hostname = hostname
-	ipd.updateChan <- IPStats{
+	ipd.updateChan <- data.IPStats{
 		IP:    ipd.IP,
 		Total: ipd.Total,
 		App:   ipd.App,
@@ -121,7 +115,10 @@ func (ipd *IPData) SetHostname(hostname string) {
 func (ipd *IPData) ShouldBeBlocked() bool {
 	log.Tracef("%s (%s) total: %d/%d/%d, ratio: %.2f/%.2f", ipd.IP, ipd.Hostname, ipd.Total, ipd.config.MinAppRequests, ipd.config.MaxAppRequests, ipd.Ratio, ipd.config.MaxRatio)
 
-	if ipd.Hostname == "" || ipd.Whitelisted {
+	decision := false
+
+	// don't block while the IP is being resolved or if it is whitelisted
+	if ipd.Hostname == "resolving" || ipd.Whitelisted {
 		return false
 	}
 
@@ -132,7 +129,7 @@ func (ipd *IPData) ShouldBeBlocked() bool {
 	}
 
 	// Is the IP whitelisted?
-	if wl, descr := ipd.config.Whitelist.IsWhitelisted(&ipd.IPDetails); wl {
+	if wl, descr := ipd.resources.Whitelist.IsWhitelisted(&ipd.IPDetails); wl {
 		ipd.Whitelisted = true
 		ipd.WhitelistReason = descr
 		return false
@@ -140,16 +137,25 @@ func (ipd *IPData) ShouldBeBlocked() bool {
 
 	if ipd.Total > ipd.config.MaxAppRequests {
 		ipd.BlockReason = fmt.Sprintf("too many requests (%d/%d)", ipd.Total, ipd.config.MaxAppRequests)
-		return true
+		decision = true
+		goto RESOLVE
 	}
 
 	if ipd.Total > ipd.config.MinAppRequests &&
 		ipd.config.MaxRatio <= ipd.Ratio {
 		ipd.BlockReason = fmt.Sprintf("too many requests (%d/%d) and app/asset ratio too high (%.2f/%0.2f)", ipd.Total, ipd.config.MinAppRequests, ipd.Ratio, ipd.config.MaxRatio)
-		return true
+		decision = true
+		goto RESOLVE
 	}
 
-	return false
+RESOLVE:
+	if decision == true && ipd.Hostname == "" {
+		ipd.Hostname = "resolving"
+		ipd.resources.Resolver.Enqueue(NewIPResolv(ipd.IP))
+		return false
+	}
+
+	return decision
 }
 
 // Expire removes all expired requests

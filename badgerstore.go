@@ -6,6 +6,7 @@ import (
 	"time"
 
 	badger "github.com/dgraph-io/badger/v3"
+	"github.com/scraperwall/botex/store"
 	log "github.com/sirupsen/logrus"
 )
 
@@ -18,7 +19,7 @@ type BadgerDB struct {
 
 // NewBadgerDB returns a new initialized BadgerDB database implementing the DB
 // interface. If the database cannot be initialized, an error will be returned.
-func NewBadgerDB(ctx context.Context, dataDir string) (KVStore, error) {
+func NewBadgerDB(ctx context.Context, dataDir string) (store.KVStore, error) {
 	opts := badger.DefaultOptions(dataDir)
 	opts.SyncWrites = true
 	opts.Dir, opts.ValueDir = dataDir, dataDir
@@ -125,11 +126,11 @@ func (bdb *BadgerDB) Close() error {
 // runGC triggers the garbage collection for the BadgerDB backend database. It
 // should be run in a goroutine.
 func (bdb *BadgerDB) runGC() {
-	ticker := time.NewTicker(badgerGCInterval)
+	ticker := time.NewTicker(30 * time.Minute)
 	for {
 		select {
 		case <-ticker.C:
-			err := bdb.db.RunValueLogGC(badgerDiscardRatio)
+			err := bdb.db.RunValueLogGC(0.99)
 			if err != nil {
 				// don't report error when GC didn't result in any cleanup
 				if err == badger.ErrNoRewrite {
@@ -176,7 +177,7 @@ func (bdb *BadgerDB) All(namespace, prefix []byte) ([][]byte, error) {
 }
 
 // Each iterates over all items that match namespace and prefix
-func (bdb *BadgerDB) Each(namespace, prefix []byte, callback KVStoreEachFunc) error {
+func (bdb *BadgerDB) Each(namespace, prefix []byte, callback store.KVStoreEachFunc) error {
 	return bdb.db.View(func(txn *badger.Txn) error {
 		it := txn.NewIterator(badger.DefaultIteratorOptions)
 		defer it.Close()

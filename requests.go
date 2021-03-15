@@ -6,6 +6,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/scraperwall/botex/config"
+	"github.com/scraperwall/botex/data"
 	log "github.com/sirupsen/logrus"
 )
 
@@ -25,7 +27,7 @@ type Requests struct {
 	allWindow          *Window
 	userAgents         *MapWindow
 	latest             *RequestsWindow
-	updateChan         chan IPStats
+	updateChan         chan data.IPStats
 	updateChanIsClosed bool
 	mutex              sync.RWMutex
 	createdAt          time.Time
@@ -35,7 +37,7 @@ type Requests struct {
 
 // NewRequests creates a new Requests item.
 // The app context and configuration get passed into the new item
-func NewRequests(ip net.IP, updateChan chan IPStats, config *Config) *Requests {
+func NewRequests(ip net.IP, updateChan chan data.IPStats, config *config.Config) *Requests {
 	reqs := &Requests{
 		IP:                 ip,
 		appWindow:          NewWindow(config.WindowSize, config.NumWindows),
@@ -112,7 +114,7 @@ func (r *Requests) Expire() int {
 }
 
 // Add adds a request
-func (r *Requests) Add(req *Request) {
+func (r *Requests) Add(req *data.Request) {
 	if r == nil || req == nil {
 		log.Fatal("r or req is nil")
 		return
@@ -154,7 +156,7 @@ func (r *Requests) Add(req *Request) {
 		ratio = float64(app) / float64(total)
 	}
 
-	stats := IPStats{
+	stats := data.IPStats{
 		IP:    r.IP,
 		Total: int(total),
 		App:   int(app),
@@ -185,7 +187,7 @@ func (r *Requests) Ratio() float64 {
 }
 
 // Latest returns the most recent requests
-func (r *Requests) Latest() []*Request {
+func (r *Requests) Latest() []*data.Request {
 	r.mutex.RLock()
 	defer r.mutex.RUnlock()
 

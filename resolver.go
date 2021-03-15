@@ -9,6 +9,7 @@ import (
 
 	"github.com/miekg/dns"
 	nats "github.com/nats-io/nats.go"
+	"github.com/scraperwall/botex/config"
 	log "github.com/sirupsen/logrus"
 )
 
@@ -20,7 +21,8 @@ const resolveNamespace = "rl"
 
 // Resolver is a DNS resolver with Redis cache
 type Resolver struct {
-	config          *Config
+	config          *config.Config
+	resources       *Resources
 	inChan          chan *IPResolv
 	outChan         chan *IPResolv
 	outChanIsClosed bool
@@ -58,17 +60,18 @@ func (rip *IPResolv) TimeTaken() time.Duration {
 }
 
 // NewResolver creates a new Resolver item
-func NewResolver(ctx context.Context, config *Config) (*Resolver, error) {
+func NewResolver(ctx context.Context, resources *Resources, config *config.Config) (*Resolver, error) {
 	var err error
 
 	r := &Resolver{
 		config:          config,
+		resources:       resources,
 		ctx:             ctx,
 		outChanIsClosed: false,
 		inChan:          make(chan *IPResolv),
 	}
 
-	r.natsJSONC, err = nats.NewEncodedConn(config.NatsConn, nats.JSON_ENCODER)
+	r.natsJSONC, err = nats.NewEncodedConn(resources.NatsConn, nats.JSON_ENCODER)
 	if err != nil {
 		return nil, err
 	}
@@ -135,7 +138,7 @@ func (r *Resolver) reverseLookup(rip *IPResolv) {
 	//
 	var err error
 	ipKey := []byte(rip.IP.String())
-	resData, err := r.config.KVStore.Get([]byte(resolveNamespace), ipKey)
+	resData, err := r.resources.KVStore.Get([]byte(resolveNamespace), ipKey)
 	if err == nil {
 		if len(resData) > 0 {
 			rip.Host = string(resData)
@@ -145,7 +148,7 @@ func (r *Resolver) reverseLookup(rip *IPResolv) {
 		}
 	}
 
-	if err == r.config.KVStore.ErrNotFound() { // the hostname doesn't exist in the cache: resolve it via DNS
+	if err == r.resources.KVStore.ErrNotFound() { // the hostname doesn't exist in the cache: resolve it via DNS
 		hostname, err2 := r.reverseDNSLookup(rip.IP)
 
 		// a DNS lookup error occured: try again
@@ -160,7 +163,7 @@ func (r *Resolver) reverseLookup(rip *IPResolv) {
 		rip.Host = hostname
 		r.outChan <- rip
 
-		err2 = r.config.KVStore.SetEx([]byte(resolveNamespace), ipKey, []byte(hostname), r.config.ResolverTTL)
+		err2 = r.resources.KVStore.SetEx([]byte(resolveNamespace), ipKey, []byte(hostname), r.config.ResolverTTL)
 		if err2 != nil {
 			log.Errorf("failed to write %s (%s) to the cache: %s", rip.IP, rip.Host, err2)
 		}

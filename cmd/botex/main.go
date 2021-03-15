@@ -14,6 +14,7 @@ import (
 
 	"github.com/namsral/flag"
 	"github.com/scraperwall/botex"
+	"github.com/scraperwall/botex/config"
 	log "github.com/sirupsen/logrus"
 )
 
@@ -39,7 +40,7 @@ func main() {
 	quit := make(chan os.Signal, 1)
 	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
 
-	config := botex.Config{}
+	config := config.Config{}
 
 	flag.IntVar(&config.NumWindows, "num-windows", 60, "number of time windows")
 	flag.DurationVar(&config.WindowSize, "window-size", time.Minute, "size of one window")
@@ -65,7 +66,7 @@ func main() {
 	flag.StringVar(&config.LogReplay, "log-replay", "", "replay this log file")
 	flag.StringVar(&config.APIAddress, "api-address", "127.0.0.1:4343", "the address and port at which the API listens")
 	flag.BoolVar(&config.LogMemoryStats, "log-memory-stats", false, "regularly log the memory consumption of the program")
-	flag.StringVar(&config.WhitelistTOML, "whitelist", "./config/whitelist.toml", "the whitelist configuration file")
+	flag.StringVar(&config.WhitelistTOML, "whitelist", "./etc/whitelist.toml", "the whitelist configuration file")
 	flag.BoolVar(&config.WithNetworks, "networks", false, "analyze requests on a per-network basis")
 
 	flag.Parse()

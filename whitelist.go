@@ -13,6 +13,8 @@ import (
 	"time"
 
 	"github.com/pelletier/go-toml"
+	"github.com/scraperwall/botex/config"
+	"github.com/scraperwall/botex/data"
 	log "github.com/sirupsen/logrus"
 	fsnotify "gopkg.in/fsnotify.v1"
 )
@@ -27,7 +29,7 @@ type Whitelist struct {
 	serverPathPattern    *regexp.Regexp
 	useragentPattern     *regexp.Regexp
 	UpdatedAt            time.Time
-	appConfig            *Config
+	appConfig            *config.Config
 	rules                WhitelistRules
 	rulesWatcher         *fsnotify.Watcher
 	blocklistRecheckChan chan bool
@@ -71,7 +73,7 @@ type WhitelistRegexps struct {
 }
 
 // NewWhitelist creates a new whitelist data structure from MongoDB
-func NewWhitelist(ctx context.Context, blocklistRecheckChan chan bool, config *Config) (*Whitelist, error) {
+func NewWhitelist(ctx context.Context, blocklistRecheckChan chan bool, config *config.Config) (*Whitelist, error) {
 	wl := &Whitelist{
 		ctx:                  ctx,
 		appConfig:            config,
@@ -233,7 +235,7 @@ func (wl *Whitelist) Load() error {
 }
 
 // IsWhitelistedByServerHost checks whether an incoming request is whitelisted by a server hostname rule
-func (wl *Whitelist) IsWhitelistedByServerHost(r *Request) bool {
+func (wl *Whitelist) IsWhitelistedByServerHost(r *data.Request) bool {
 	wl.mutex.RLock()
 	defer wl.mutex.RUnlock()
 
@@ -241,7 +243,7 @@ func (wl *Whitelist) IsWhitelistedByServerHost(r *Request) bool {
 }
 
 // IsWhitelistedByServerPath checks whether an incoming request is whitelisted by a server path (URL) rule
-func (wl *Whitelist) IsWhitelistedByServerPath(r *Request) bool {
+func (wl *Whitelist) IsWhitelistedByServerPath(r *data.Request) bool {
 	wl.mutex.RLock()
 	defer wl.mutex.RUnlock()
 
@@ -249,7 +251,7 @@ func (wl *Whitelist) IsWhitelistedByServerPath(r *Request) bool {
 }
 
 // IsWhitelistedByUseragent checks whether an incoming request is whitelisted by a useragent rule
-func (wl *Whitelist) IsWhitelistedByUseragent(r *Request) bool {
+func (wl *Whitelist) IsWhitelistedByUseragent(r *data.Request) bool {
 	wl.mutex.RLock()
 	defer wl.mutex.RUnlock()
 

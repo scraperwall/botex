@@ -6,6 +6,7 @@ import (
 	"os"
 	"testing"
 
+	"github.com/scraperwall/botex/config"
 	log "github.com/sirupsen/logrus"
 )
 
@@ -61,7 +62,7 @@ func TestWhitelistLoad(t *testing.T) {
 		t.Error(err)
 	}
 
-	config := Config{
+	config := config.Config{
 		WhitelistTOML: fh.Name(),
 	}
 

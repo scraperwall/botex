@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net"
+	"time"
 
 	log "github.com/sirupsen/logrus"
 )
@@ -13,16 +14,18 @@ const blockNamespace = "bl"
 
 // Blocklist is used to add IPs to the blocklist and to check whether an IP is blocked
 type Blocklist struct {
-	config      *Config
+	resources   *Resources
+	blockTTL    time.Duration
 	recheckChan chan bool
 	ctx         context.Context
 }
 
 // NewBlocklist creates a new Blocklist.
 // The parent context and application configuration are passed on to the new instance
-func NewBlocklist(ctx context.Context, recheckChan chan bool, config *Config) *Blocklist {
+func NewBlocklist(ctx context.Context, recheckChan chan bool, resources *Resources, blockTTL time.Duration) *Blocklist {
 	bl := &Blocklist{
-		config:      config,
+		resources:   resources,
+		blockTTL:    blockTTL,
 		recheckChan: recheckChan,
 		ctx:         ctx,
 	}
@@ -34,13 +37,13 @@ func NewBlocklist(ctx context.Context, recheckChan chan bool, config *Config) *B
 
 // Count returns the number of currently blocked IPs
 func (b *Blocklist) Count() int {
-	c, _ := b.config.KVStore.Count([]byte(blockNamespace), []byte{})
+	c, _ := b.resources.KVStore.Count([]byte(blockNamespace), []byte{})
 	return c
 }
 
 // Get retrieves an IPDetails item about a blocked IP. If the IP isn't blocked an error is returned
 func (b *Blocklist) Get(ip net.IP) (*IPDetails, error) {
-	data, err := b.config.KVStore.Get([]byte(blockNamespace), []byte(ip.String()))
+	data, err := b.resources.KVStore.Get([]byte(blockNamespace), []byte(ip.String()))
 	if err != nil {
 		return nil, err
 	}
@@ -52,7 +55,7 @@ func (b *Blocklist) Get(ip net.IP) (*IPDetails, error) {
 
 // All returns all currently blocked IPs
 func (b *Blocklist) All() ([]*IPDetails, error) {
-	data, err := b.config.KVStore.All([]byte(blockNamespace), []byte{})
+	data, err := b.resources.KVStore.All([]byte(blockNamespace), []byte{})
 	if err != nil {
 		return nil, err
 	}
@@ -87,8 +90,8 @@ func (b *Blocklist) Block(ipd *IPDetails) error {
 
 	ipd.IsBlocked = true
 
-	data, err := b.config.KVStore.Get([]byte(blockNamespace), []byte(ipstr))
-	if err != nil && err != b.config.KVStore.ErrNotFound() {
+	data, err := b.resources.KVStore.Get([]byte(blockNamespace), []byte(ipstr))
+	if err != nil && err != b.resources.KVStore.ErrNotFound() {
 		return err
 	}
 
@@ -102,13 +105,13 @@ func (b *Blocklist) Block(ipd *IPDetails) error {
 	if err != nil {
 		return err
 	}
-	return b.config.KVStore.SetEx([]byte(blockNamespace), []byte(ipstr), data, b.config.BlockTTL)
+	return b.resources.KVStore.SetEx([]byte(blockNamespace), []byte(ipstr), data, b.blockTTL)
 }
 
 // Remove removes an IP from the blocklist
 func (b *Blocklist) Remove(ip net.IP) error {
 	log.Infof("removing %s from the blocklist", ip)
-	return b.config.KVStore.Remove([]byte(blockNamespace), []byte(ip.String()))
+	return b.resources.KVStore.Remove([]byte(blockNamespace), []byte(ip.String()))
 }
 
 // echeck unblocks every IP that has been whitelisted since it was written to the blocklist
@@ -119,13 +122,13 @@ func (b *Blocklist) recheck() {
 			return
 		case <-b.recheckChan:
 			var ipd IPDetails
-			b.config.KVStore.Each([]byte(blockNamespace), []byte{}, func(v []byte) {
+			b.resources.KVStore.Each([]byte(blockNamespace), []byte{}, func(v []byte) {
 				err := json.Unmarshal(v, &ipd)
 				if err != nil {
 					log.Warn("failed to unmarshal blocked IP for blocklist recheck")
 				}
 
-				if wl, _ := b.config.Whitelist.IsWhitelisted(&ipd); wl {
+				if wl, _ := b.resources.Whitelist.IsWhitelisted(&ipd); wl {
 					b.Remove(ipd.IP)
 				}
 			})
