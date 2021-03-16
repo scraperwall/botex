@@ -25,7 +25,7 @@ func (hook lineNumberHook) Levels() []log.Level {
 }
 
 func (hook lineNumberHook) Fire(entry *log.Entry) error {
-	if pc, file, line, ok := runtime.Caller(10); ok {
+	if pc, file, line, ok := runtime.Caller(9); ok {
 		funcName := runtime.FuncForPC(pc).Name()
 
 		entry.Data["source"] = fmt.Sprintf("%s:%v:%s", path.Base(file), line, path.Base(funcName))
@@ -56,7 +56,7 @@ func main() {
 	flag.IntVar(&config.KeepRequests, "keep-requests", 50, "keep this many most recent requests")
 	flag.IntVar(&config.ResolverWorkers, "resolver-workers", 30, "number of DNS resolver workers")
 	flag.IntVar(&config.ResolverTries, "resolver-tries", 5, "try to resolve an IP this many times before giving up")
-	flag.IntVar(&config.LogLevel, "loglevel", int(log.ErrorLevel), "the log level")
+	flag.StringVar(&config.LogLevel, "loglevel", "error", "the logrus loglevel (panic, fatal, error, warn, info, debug, trace)")
 	flag.DurationVar(&config.ResolverTTL, "resolver-ttl", 3*30*24*time.Hour, "cache reverse hostnames this long")
 	flag.DurationVar(&config.BlockTTL, "block-ttl", 3*time.Hour, "block bot IPs this long")
 	flag.IntVar(&config.MinAppRequests, "min-app-requests", 10, "don't block an IP if it makes less than this many app requests")
@@ -71,7 +71,11 @@ func main() {
 
 	flag.Parse()
 
-	log.SetLevel(log.Level(config.LogLevel))
+	ll, err := log.ParseLevel(config.LogLevel)
+	if err != nil {
+		log.Fatal(err)
+	}
+	log.SetLevel(ll)
 	log.AddHook(lineNumberHook{})
 
 	ctx, cancel := context.WithCancel(context.Background())

@@ -48,14 +48,10 @@ func (b *Botex) HandleRequest(r *data.Request) {
 	ip := net.ParseIP(r.Source)
 
 	log.Tracef("received %s - %s", ip, r.URL)
-	newIP := b.history.Add(r)
+	b.history.Add(r)
 	log.Tracef("added %s to history", ip)
 
-	if newIP {
-		r.ASN = b.resources.ASNDB.Lookup(ip)
-		// log.Tracef("enqueueing %s", ip)
-		// b.resolver.Enqueue(NewIPResolv(ip))
-	}
+	r.ASN = b.resources.ASNDB.Lookup(ip)
 
 	go func() {
 		for _, p := range b.plugins {

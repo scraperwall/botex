@@ -22,7 +22,7 @@ type Config struct {
 	ResolverWorkers int
 	ResolverTries   int
 	ResolverTTL     time.Duration
-	LogLevel        int
+	LogLevel        string
 	BlockTTL        time.Duration
 	MaxRatio        float64
 	MinAppRequests  int
