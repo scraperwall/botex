@@ -270,7 +270,7 @@ func (b *Botex) blockWorker() {
 		case <-b.ctx.Done():
 			return
 		case block := <-b.resources.BlockChan:
-			if err := b.blocklist.Block(block); err != nil {
+			if err := b.blocklist.BlockIP(block); err != nil {
 				log.Errorf("failed to write blocked IP %s to kvstore: %s", block.IP, err)
 			}
 		}

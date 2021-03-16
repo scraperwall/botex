@@ -45,8 +45,8 @@ func (b *Blocklist) Count() int {
 	return c
 }
 
-// Get retrieves an IPDetails item about a blocked IP. If the IP isn't blocked an error is returned
-func (b *Blocklist) Get(ip net.IP) (*IPDetails, error) {
+// GetIP retrieves an IPDetails item about a blocked IP. If the IP isn't blocked an error is returned
+func (b *Blocklist) GetIP(ip net.IP) (*IPDetails, error) {
 	data, err := b.resources.Store.Get(b.ipNamespace(), ip)
 	if err != nil {
 		return nil, err
@@ -77,9 +77,9 @@ func (b *Blocklist) All() ([]*IPDetails, error) {
 	return res, nil
 }
 
-// Block writes an IPs details to the blocklist.
+// BlockIP writes an IPs details to the blocklist.
 // It returns an error if writing the information failed
-func (b *Blocklist) Block(ipd *IPDetails) error {
+func (b *Blocklist) BlockIP(ipd *IPDetails) error {
 	if ipd == nil {
 		return errors.New("IPDetails are nil")
 	}
@@ -110,8 +110,8 @@ func (b *Blocklist) Block(ipd *IPDetails) error {
 	return b.resources.Store.SetEx([]byte(blockNamespace), ipd.IP, data, b.blockTTL)
 }
 
-// Remove removes an IP from the blocklist
-func (b *Blocklist) Remove(ip net.IP) error {
+// RemoveIP removes an IP from the blocklist
+func (b *Blocklist) RemoveIP(ip net.IP) error {
 	log.Infof("removing %s from the blocklist", ip)
 	return b.resources.Store.Remove([]byte(blockNamespace), ip)
 }
@@ -131,7 +131,7 @@ func (b *Blocklist) recheck() {
 				}
 
 				if wl, _ := b.resources.Whitelist.IsWhitelisted(&ipd); wl {
-					b.Remove(ipd.IP)
+					b.RemoveIP(ipd.IP)
 				}
 			})
 		}
