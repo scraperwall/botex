@@ -4,22 +4,6 @@ import (
 	"time"
 )
 
-const (
-	// Default BadgerDB discardRatio. It represents the discard ratio for the
-	// BadgerDB GC.
-	//
-	// Ref: https://godoc.org/github.com/dgraph-io/badger#DB.RunValueLogGC
-	badgerDiscardRatio = 0.5
-
-	// Default BadgerDB GC interval
-	badgerGCInterval = 10 * time.Minute
-)
-
-var (
-	// BadgerAlertNamespace defines the alerts BadgerDB namespace.
-	BadgerAlertNamespace = []byte("alerts")
-)
-
 // KVStoreEachFunc is the function that gets called on each item in the Each function
 type KVStoreEachFunc func([]byte)
 

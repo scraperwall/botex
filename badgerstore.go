@@ -126,11 +126,11 @@ func (bdb *BadgerDB) Close() error {
 // runGC triggers the garbage collection for the BadgerDB backend database. It
 // should be run in a goroutine.
 func (bdb *BadgerDB) runGC() {
-	ticker := time.NewTicker(30 * time.Minute)
+	ticker := time.NewTicker(10 * time.Minute)
 	for {
 		select {
 		case <-ticker.C:
-			err := bdb.db.RunValueLogGC(0.99)
+			err := bdb.db.RunValueLogGC(0.5)
 			if err != nil {
 				// don't report error when GC didn't result in any cleanup
 				if err == badger.ErrNoRewrite {
