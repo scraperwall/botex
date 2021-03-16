@@ -12,9 +12,9 @@ import (
 )
 
 const blockNamespace = "bl"
-const byIPNamespace = "ip"
-const byASNNamespace = "asn"
-const byCIDRNamespace = "cidr"
+const blockByIPNamespace = "ip"
+const blockByASNNamespace = "asn"
+const blockByCIDRNamespace = "cidr"
 
 // Blocklist is used to add IPs to the blocklist and to check whether an IP is blocked
 type Blocklist struct {
@@ -139,13 +139,13 @@ func (b *Blocklist) recheck() {
 }
 
 func (b *Blocklist) ipNamespace() []byte {
-	return []byte(fmt.Sprintf("%s:%s", blockNamespace, byIPNamespace))
+	return []byte(fmt.Sprintf("%s:%s", blockNamespace, blockByIPNamespace))
 }
 
 func (b *Blocklist) asbNamespace() []byte {
-	return []byte(fmt.Sprintf("%s:%s", blockNamespace, byASNNamespace))
+	return []byte(fmt.Sprintf("%s:%s", blockNamespace, blockByASNNamespace))
 }
 
 func (b *Blocklist) cidrNamespace() []byte {
-	return []byte(fmt.Sprintf("%s:%s", blockNamespace, byCIDRNamespace))
+	return []byte(fmt.Sprintf("%s:%s", blockNamespace, blockByCIDRNamespace))
 }
