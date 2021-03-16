@@ -13,7 +13,7 @@ type Resources struct {
 	GEOIPDB    *geoip.DB
 	NatsServer *natsd.Server
 	NatsConn   *nats.Conn
-	KVStore    store.KVStore
+	Store      store.KVStore
 	Whitelist  *Whitelist
 	Resolver   *Resolver
 

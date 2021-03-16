@@ -165,7 +165,7 @@ func New(ctx context.Context, config *config.Config) (*Botex, error) {
 	//
 	bopts := badger.DefaultOptions(config.BadgerPath)
 	bopts.SyncWrites = true
-	b.resources.KVStore, err = NewBadgerDB(ctx, config.BadgerPath)
+	b.resources.Store, err = NewBadgerDB(ctx, config.BadgerPath)
 	if err != nil {
 		return nil, err
 	}
@@ -225,7 +225,7 @@ func New(ctx context.Context, config *config.Config) (*Botex, error) {
 		}
 		b.resources.NatsServer.Shutdown()
 		b.resources.NatsConn.Drain()
-		b.resources.KVStore.Close()
+		b.resources.Store.Close()
 	}()
 
 	return b, nil

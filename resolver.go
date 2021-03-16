@@ -138,7 +138,7 @@ func (r *Resolver) reverseLookup(rip *IPResolv) {
 	//
 	var err error
 	ipKey := []byte(rip.IP.String())
-	resData, err := r.resources.KVStore.Get([]byte(resolveNamespace), ipKey)
+	resData, err := r.resources.Store.Get([]byte(resolveNamespace), ipKey)
 	if err == nil {
 		if len(resData) > 0 {
 			rip.Host = string(resData)
@@ -148,7 +148,7 @@ func (r *Resolver) reverseLookup(rip *IPResolv) {
 		}
 	}
 
-	if err == r.resources.KVStore.ErrNotFound() { // the hostname doesn't exist in the cache: resolve it via DNS
+	if err == r.resources.Store.ErrNotFound() { // the hostname doesn't exist in the cache: resolve it via DNS
 		hostname, err2 := r.reverseDNSLookup(rip.IP)
 
 		// a DNS lookup error occured: try again
@@ -163,7 +163,7 @@ func (r *Resolver) reverseLookup(rip *IPResolv) {
 		rip.Host = hostname
 		r.outChan <- rip
 
-		err2 = r.resources.KVStore.SetEx([]byte(resolveNamespace), ipKey, []byte(hostname), r.config.ResolverTTL)
+		err2 = r.resources.Store.SetEx([]byte(resolveNamespace), ipKey, []byte(hostname), r.config.ResolverTTL)
 		if err2 != nil {
 			log.Errorf("failed to write %s (%s) to the cache: %s", rip.IP, rip.Host, err2)
 		}
