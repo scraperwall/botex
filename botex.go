@@ -28,7 +28,7 @@ type Botex struct {
 	natsSubscriptions []*nats.Subscription
 
 	history   *History
-	blocklist *Block
+	blocked   *Block
 	config    *config.Config
 	resources *Resources
 	api       *API
@@ -79,31 +79,31 @@ func (na *natsAuth) Check(c natsd.ClientAuthentication) bool {
 func New(ctx context.Context, config *config.Config) (*Botex, error) {
 	var err error
 
-	blockRecheckChan := make(chan bool)
+	blockRecheckChan := make(chan bool, 10)
 	resources := NewResources()
 
-	b := &Botex{
-		config:            config,
-		resources:         resources,
-		blocklist:         NewBlock(ctx, blockRecheckChan, resources, config.BlockTTL),
-		natsSubscriptions: make([]*nats.Subscription, 0),
-		plugins:           make([]Plugin, 0),
-		ctx:               ctx,
+	// Badger
+	//
+	bopts := badger.DefaultOptions(config.BadgerPath)
+	bopts.SyncWrites = true
+	resources.Store, err = store.NewBadgerDB(ctx, config.BadgerPath)
+	if err != nil {
+		return nil, err
 	}
 
-	b.resources.BlockChan = make(chan *IPDetails, 100)
+	resources.BlockChan = make(chan *IPDetails, 100)
 
 	// ASN Database
 	//
-	b.resources.ASNDB, err = asndb.New(config.ASNDBFile)
+	resources.ASNDB, err = asndb.New(config.ASNDBFile)
 	if err != nil {
 		log.Fatal(err)
 	}
-	log.Infof("asndb loaded with %d records", b.resources.ASNDB.Size())
+	log.Infof("asndb loaded with %d records", resources.ASNDB.Size())
 
 	// GeoIP Database
 	//
-	b.resources.GEOIPDB, err = geoip.New(config.GeoIPDBFile)
+	resources.GEOIPDB, err = geoip.New(config.GeoIPDBFile)
 	if err != nil {
 		return nil, err
 	}
@@ -124,82 +124,89 @@ func New(ctx context.Context, config *config.Config) (*Botex, error) {
 		TraceVerbose: true,
 	}
 
-	b.resources.NatsServer = natsd.New(nopts)
-	go b.resources.NatsServer.Start()
-	if !b.resources.NatsServer.ReadyForConnections(2 * time.Second) {
-		b.resources.NatsServer.Shutdown()
+	resources.NatsServer = natsd.New(nopts)
+	go resources.NatsServer.Start()
+	if !resources.NatsServer.ReadyForConnections(2 * time.Second) {
+		resources.NatsServer.Shutdown()
 		return nil, errors.New("nats server failed to startup")
 	}
+	log.Info("natsd started")
 
 	// NATS client
 	//
 	natsSlowLogFunc := func(c *nats.Conn, s *nats.Subscription, err error) {
-		// limita, limitb, _ := s.PendingLimits()
 		pnum, psize, _ := s.Pending()
 		delivered, _ := s.Delivered()
 		dropped, _ := s.Dropped()
 
 		log.Warnf("nats error: %s del: %d / drop: %d / pend: %d/%d / err: %v", s.Subject, delivered, dropped, pnum, psize, err)
 	}
-	b.resources.NatsConn, err = nats.Connect(fmt.Sprintf("nats://127.0.0.1:%d/", config.NatsPort), nats.ErrorHandler(natsSlowLogFunc), nats.UserInfo(config.NatsUser, config.NatsPassword))
+	resources.NatsConn, err = nats.Connect(fmt.Sprintf("nats://127.0.0.1:%d/", config.NatsPort), nats.ErrorHandler(natsSlowLogFunc), nats.UserInfo(config.NatsUser, config.NatsPassword))
 	if err != nil {
-		b.resources.NatsServer.Shutdown()
+		resources.NatsServer.Shutdown()
 		return nil, err
 	}
+	log.Info("nats connection established")
 
-	jsonc, err := nats.NewEncodedConn(b.resources.NatsConn, nats.JSON_ENCODER)
+	jsonc, err := nats.NewEncodedConn(resources.NatsConn, nats.JSON_ENCODER)
 	if err != nil {
-		b.resources.NatsServer.Shutdown()
+		resources.NatsServer.Shutdown()
 		return nil, err
 	}
-
-	reqSubscription, err := jsonc.Subscribe(natsRequestsSubject, b.HandleRequest)
-	if err != nil {
-		b.resources.NatsServer.Shutdown()
-		return nil, err
-	}
-	reqSubscription.SetPendingLimits(200000, 10*1024*1024*1024) // 200.000 messages or 10GB
-
-	b.natsSubscriptions = append(b.natsSubscriptions, reqSubscription)
-
-	// Badger
-	//
-	bopts := badger.DefaultOptions(config.BadgerPath)
-	bopts.SyncWrites = true
-	b.resources.Store, err = store.NewBadgerDB(ctx, config.BadgerPath)
-	if err != nil {
-		return nil, err
-	}
-
-	// Whitelist
-	//
-	b.resources.Whitelist, err = NewWhitelist(ctx, blockRecheckChan, config)
-	if err != nil {
-		log.Fatal(err)
-	}
-
-	// History
-	//
-	b.history = NewHistory(ctx, b.resources, config)
+	log.Info("nats json connection established")
 
 	// Resolver
 	//
-	b.resources.Resolver, err = NewResolver(ctx, b.resources, config)
+	resources.Resolver, err = NewResolver(ctx, resources, config)
 	if err != nil {
 		return nil, err
 	}
 
 	resolvChan := make(chan *IPResolv, 2000)
-	err = b.resources.Resolver.StartWorkers(resolvChan)
+	err = resources.Resolver.StartWorkers(resolvChan)
 	if err != nil {
 		return nil, err
 	}
+	log.Info("resolver created")
+
+	// Whitelist
+	//
+	resources.Whitelist, err = NewWhitelist(ctx, blockRecheckChan, config)
+	if err != nil {
+		log.Fatal(err)
+	}
+	log.Info("whitelist created")
+
+	b := &Botex{
+		config:            config,
+		resources:         resources,
+		blocked:           NewBlock(ctx, blockRecheckChan, resources, config.BlockTTL),
+		natsSubscriptions: make([]*nats.Subscription, 0),
+		plugins:           make([]Plugin, 0),
+		ctx:               ctx,
+	}
+
+	// NATS subscriptions
+	reqSubscription, err := jsonc.Subscribe(natsRequestsSubject, b.HandleRequest)
+	if err != nil {
+		resources.NatsServer.Shutdown()
+		return nil, err
+	}
+	reqSubscription.SetPendingLimits(200000, 10*1024*1024*1024) // 200.000 messages or 10GB
+
+	b.natsSubscriptions = append(b.natsSubscriptions, reqSubscription)
+	log.Info("nats subscriptions done")
+
+	// History
+	//
+	b.history = NewHistory(ctx, b.resources, config)
+	log.Info("history created")
 
 	// Networks
 	//
 	if config.WithNetworks {
-		log.Infof("enabling networka")
 		b.Use(plugins.NewNetworks(ctx, config))
+		log.Infof("networks enabled")
 	}
 
 	// API
@@ -208,6 +215,7 @@ func New(ctx context.Context, config *config.Config) (*Botex, error) {
 	if err != nil {
 		return nil, err
 	}
+	log.Info("API running")
 
 	if config.LogMemoryStats {
 		go b.logMemoryStats(ctx)
@@ -271,7 +279,7 @@ func (b *Botex) blockWorker() {
 		case <-b.ctx.Done():
 			return
 		case block := <-b.resources.BlockChan:
-			if err := b.blocklist.BlockIP(block); err != nil {
+			if err := b.blocked.BlockIP(block); err != nil {
 				log.Errorf("failed to write blocked IP %s to kvstore: %s", block.IP, err)
 			}
 		}
@@ -317,7 +325,7 @@ func (b *Botex) statsLogWorker() {
 			numIPs := b.history.Size()
 			stats := b.history.TotalStats()
 
-			log.Infof("stats :: %d IPs / %d with hostname / %d blocked :: Requests %d Total / %d App / %d Other / %.2f Ratio", numIPs, stats.WithHostname, b.blocklist.Count(), stats.Total, stats.App, stats.Other, stats.Ratio)
+			log.Infof("stats :: %d IPs / %d with hostname / %d blocked :: Requests %d Total / %d App / %d Other / %.2f Ratio", numIPs, stats.WithHostname, b.blocked.CountIPs(), stats.Total, stats.App, stats.Other, stats.Ratio)
 		}
 	}
 }
