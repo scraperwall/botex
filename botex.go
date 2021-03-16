@@ -28,7 +28,7 @@ type Botex struct {
 	natsSubscriptions []*nats.Subscription
 
 	history   *History
-	blocklist *Blocklist
+	blocklist *Block
 	config    *config.Config
 	resources *Resources
 	api       *API
@@ -79,13 +79,13 @@ func (na *natsAuth) Check(c natsd.ClientAuthentication) bool {
 func New(ctx context.Context, config *config.Config) (*Botex, error) {
 	var err error
 
-	blocklistRecheckChan := make(chan bool)
+	blockRecheckChan := make(chan bool)
 	resources := NewResources()
 
 	b := &Botex{
 		config:            config,
 		resources:         resources,
-		blocklist:         NewBlocklist(ctx, blocklistRecheckChan, resources, config.BlockTTL),
+		blocklist:         NewBlock(ctx, blockRecheckChan, resources, config.BlockTTL),
 		natsSubscriptions: make([]*nats.Subscription, 0),
 		plugins:           make([]Plugin, 0),
 		ctx:               ctx,
@@ -173,7 +173,7 @@ func New(ctx context.Context, config *config.Config) (*Botex, error) {
 
 	// Whitelist
 	//
-	b.resources.Whitelist, err = NewWhitelist(ctx, blocklistRecheckChan, config)
+	b.resources.Whitelist, err = NewWhitelist(ctx, blockRecheckChan, config)
 	if err != nil {
 		log.Fatal(err)
 	}
