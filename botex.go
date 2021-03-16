@@ -16,6 +16,7 @@ import (
 	"github.com/scraperwall/botex/config"
 	"github.com/scraperwall/botex/data"
 	"github.com/scraperwall/botex/plugins"
+	"github.com/scraperwall/botex/store"
 	"github.com/scraperwall/geoip/v2"
 	log "github.com/sirupsen/logrus"
 )
@@ -165,7 +166,7 @@ func New(ctx context.Context, config *config.Config) (*Botex, error) {
 	//
 	bopts := badger.DefaultOptions(config.BadgerPath)
 	bopts.SyncWrites = true
-	b.resources.Store, err = NewBadgerDB(ctx, config.BadgerPath)
+	b.resources.Store, err = store.NewBadgerDB(ctx, config.BadgerPath)
 	if err != nil {
 		return nil, err
 	}

@@ -1,4 +1,4 @@
-package botex
+package store
 
 import (
 	"context"
@@ -6,7 +6,6 @@ import (
 	"time"
 
 	badger "github.com/dgraph-io/badger/v3"
-	"github.com/scraperwall/botex/store"
 	log "github.com/sirupsen/logrus"
 )
 
@@ -19,7 +18,7 @@ type BadgerDB struct {
 
 // NewBadgerDB returns a new initialized BadgerDB database implementing the DB
 // interface. If the database cannot be initialized, an error will be returned.
-func NewBadgerDB(ctx context.Context, dataDir string) (store.KVStore, error) {
+func NewBadgerDB(ctx context.Context, dataDir string) (KVStore, error) {
 	opts := badger.DefaultOptions(dataDir)
 	opts.SyncWrites = true
 	opts.Dir, opts.ValueDir = dataDir, dataDir
@@ -177,7 +176,7 @@ func (bdb *BadgerDB) All(namespace, prefix []byte) ([][]byte, error) {
 }
 
 // Each iterates over all items that match namespace and prefix
-func (bdb *BadgerDB) Each(namespace, prefix []byte, callback store.KVStoreEachFunc) error {
+func (bdb *BadgerDB) Each(namespace, prefix []byte, callback KVStoreEachFunc) error {
 	return bdb.db.View(func(txn *badger.Txn) error {
 		it := txn.NewIterator(badger.DefaultIteratorOptions)
 		defer it.Close()
