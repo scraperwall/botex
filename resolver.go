@@ -17,7 +17,8 @@ import (
 const DNSLookupError = "lookup error"
 const reverseLookupQueue = "reverse"
 const resolveTopic = "resolv"
-const resolveNamespace = "rl"
+
+// const resolveNamespace = "rl"
 
 // Resolver is a DNS resolver with Redis cache
 type Resolver struct {
@@ -138,7 +139,7 @@ func (r *Resolver) reverseLookup(rip *IPResolv) {
 	//
 	var err error
 	ipKey := []byte(rip.IP.String())
-	resData, err := r.resources.Store.Get([]byte(resolveNamespace), ipKey)
+	resData, err := r.resources.Store.Get(r.resolveNamespace(ipKey))
 	if err == nil {
 		if len(resData) > 0 {
 			rip.Host = string(resData)
@@ -163,7 +164,7 @@ func (r *Resolver) reverseLookup(rip *IPResolv) {
 		rip.Host = hostname
 		r.outChan <- rip
 
-		err2 = r.resources.Store.SetEx([]byte(resolveNamespace), ipKey, []byte(hostname), r.config.ResolverTTL)
+		err2 = r.resources.Store.SetEx(r.resolveNamespace(ipKey), []byte(hostname), r.config.ResolverTTL)
 		if err2 != nil {
 			log.Errorf("failed to write %s (%s) to the cache: %s", rip.IP, rip.Host, err2)
 		}
@@ -237,4 +238,8 @@ func (r *Resolver) Enqueue(rip *IPResolv) {
 	if err != nil {
 		log.Errorf("error publishing: %s", err)
 	}
+}
+
+func (r *Resolver) resolveNamespace(ip []byte) []byte {
+	return []byte(fmt.Sprintf("%s:%s:%s", "rl", "ip", ip))
 }

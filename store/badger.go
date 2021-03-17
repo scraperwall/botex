@@ -2,7 +2,6 @@ package store
 
 import (
 	"context"
-	"fmt"
 	"time"
 
 	badger "github.com/dgraph-io/badger/v3"
@@ -40,12 +39,12 @@ func NewBadgerDB(ctx context.Context, dataDir string) (KVStore, error) {
 // Get implements the DB interface. It attempts to get a value for a given key
 // and namespace. If the key does not exist in the provided namespace, an error
 // is returned, otherwise the retrieved value.
-func (bdb *BadgerDB) Get(namespace, key []byte) ([]byte, error) {
+func (bdb *BadgerDB) Get(key []byte) ([]byte, error) {
 	var value []byte
 	var err error
 
 	err = bdb.db.View(func(txn *badger.Txn) error {
-		item, err2 := txn.Get(bdb.badgerNamespaceKey(namespace, key))
+		item, err2 := txn.Get(key)
 		if err2 != nil {
 			return err2
 		}
@@ -66,9 +65,9 @@ func (bdb *BadgerDB) Get(namespace, key []byte) ([]byte, error) {
 
 // Set implements the DB interface. It attempts to store a value for a given key
 // and namespace. If the key/value pair cannot be saved, an error is returned.
-func (bdb *BadgerDB) Set(namespace, key, value []byte) error {
+func (bdb *BadgerDB) Set(key, value []byte) error {
 	err := bdb.db.Update(func(txn *badger.Txn) error {
-		return txn.Set(bdb.badgerNamespaceKey(namespace, key), value)
+		return txn.Set(key, value)
 	})
 
 	if err != nil {
@@ -80,9 +79,9 @@ func (bdb *BadgerDB) Set(namespace, key, value []byte) error {
 
 // SetEx stores the given key and value for the time given by ttl
 // If the key/value pair can't be saved an error is returned
-func (bdb *BadgerDB) SetEx(namespace, key, value []byte, ttl time.Duration) error {
+func (bdb *BadgerDB) SetEx(key, value []byte, ttl time.Duration) error {
 	err := bdb.db.Update(func(txn *badger.Txn) error {
-		e := badger.NewEntry(bdb.badgerNamespaceKey(namespace, key), value).WithTTL(ttl)
+		e := badger.NewEntry(key, value).WithTTL(ttl)
 		return txn.SetEntry(e)
 	})
 
@@ -95,17 +94,41 @@ func (bdb *BadgerDB) SetEx(namespace, key, value []byte, ttl time.Duration) erro
 }
 
 // Remove removes a single entry from the database
-func (bdb *BadgerDB) Remove(namespace, key []byte) error {
+func (bdb *BadgerDB) Remove(prefix []byte) error {
+	keysToDelete := make([][]byte, 0)
+
+	err := bdb.db.View(func(txn *badger.Txn) error {
+		opts := badger.DefaultIteratorOptions
+		opts.AllVersions = false
+		opts.PrefetchValues = false
+		it := txn.NewIterator(opts)
+		defer it.Close()
+
+		for it.Seek(prefix); it.ValidForPrefix(prefix); it.Next() {
+			keysToDelete = append(keysToDelete, it.Item().KeyCopy(nil))
+		}
+
+		return nil
+	})
+	if err != nil {
+		return err
+	}
+
 	return bdb.db.Update(func(txn *badger.Txn) error {
-		return txn.Delete(bdb.badgerNamespaceKey(namespace, key))
+		for _, key := range keysToDelete {
+			if err := txn.Delete(key); err != nil {
+				return err
+			}
+		}
+		return nil
 	})
 }
 
 // Has implements the DB interface. It returns a boolean reflecting if the
 // datbase has a given key for a namespace or not. An error is only returned if
 // an error to Get would be returned that is not of type badger.ErrKeyNotFound.
-func (bdb *BadgerDB) Has(namespace, key []byte) (ok bool, err error) {
-	_, err = bdb.Get(namespace, key)
+func (bdb *BadgerDB) Has(key []byte) (ok bool, err error) {
+	_, err = bdb.Get(key)
 	switch err {
 	case badger.ErrKeyNotFound:
 		ok, err = false, nil
@@ -146,13 +169,13 @@ func (bdb *BadgerDB) runGC() {
 }
 
 // All returns all values for the given namespace and prefix.
-func (bdb *BadgerDB) All(namespace, prefix []byte) ([][]byte, error) {
+func (bdb *BadgerDB) All(prefix []byte) ([][]byte, error) {
 	res := make([][]byte, 0)
 
 	err := bdb.db.View(func(txn *badger.Txn) error {
 		it := txn.NewIterator(badger.DefaultIteratorOptions)
 		defer it.Close()
-		prefix := bdb.badgerNamespaceKey(namespace, prefix)
+		// prefix := bdb.badgerNamespaceKey(prefix)
 		for it.Seek(prefix); it.ValidForPrefix(prefix); it.Next() {
 			item := it.Item()
 			err := item.Value(func(v []byte) error {
@@ -176,11 +199,11 @@ func (bdb *BadgerDB) All(namespace, prefix []byte) ([][]byte, error) {
 }
 
 // Each iterates over all items that match namespace and prefix
-func (bdb *BadgerDB) Each(namespace, prefix []byte, callback KVStoreEachFunc) error {
+func (bdb *BadgerDB) Each(prefix []byte, callback KVStoreEachFunc) error {
 	return bdb.db.View(func(txn *badger.Txn) error {
 		it := txn.NewIterator(badger.DefaultIteratorOptions)
 		defer it.Close()
-		prefix := bdb.badgerNamespaceKey(namespace, prefix)
+		// prefix := bdb.badgerNamespaceKey(namespace, prefix)
 		for it.Seek(prefix); it.ValidForPrefix(prefix); it.Next() {
 			item := it.Item()
 			err := item.Value(func(v []byte) error {
@@ -196,13 +219,13 @@ func (bdb *BadgerDB) Each(namespace, prefix []byte, callback KVStoreEachFunc) er
 }
 
 // Count returns the number of entries that match namespace and prefix
-func (bdb *BadgerDB) Count(namespace, prefix []byte) (int, error) {
+func (bdb *BadgerDB) Count(prefix []byte) (int, error) {
 	c := 0
 
 	err := bdb.db.View(func(txn *badger.Txn) error {
 		it := txn.NewIterator(badger.DefaultIteratorOptions)
 		defer it.Close()
-		prefix := bdb.badgerNamespaceKey(namespace, prefix)
+		// prefix := bdb.badgerNamespaceKey(namespace, prefix)
 		for it.Seek(prefix); it.ValidForPrefix(prefix); it.Next() {
 			c++
 		}
@@ -223,6 +246,8 @@ func (bdb *BadgerDB) ErrNotFound() error {
 
 // badgerNamespaceKey returns a composite key used for lookup and storage for a
 // given namespace and key.
+/*
 func (bdb *BadgerDB) badgerNamespaceKey(namespace, key []byte) []byte {
 	return []byte(fmt.Sprintf("%s/%s", string(namespace), string(key)))
 }
+*/

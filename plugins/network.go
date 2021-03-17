@@ -21,11 +21,12 @@ import (
 // Networks contains requests statistics for all networks
 type Networks struct {
 	data       map[string]*NetworkData
-	asnData    map[string]int
+	asnData    map[int]*data.ASNStats
 	asnAverage int
-	netData    map[string]int
+	netData    map[string]*data.ASNStats
 	netAverage int
 	mutex      sync.RWMutex
+	blocker    data.Blocker
 	removeChan chan *net.IPNet
 	windowSize time.Duration
 	numWindows int
@@ -364,45 +365,99 @@ func (n *Networks) APIHooks(r *gin.Engine) {
 	r.GET("/network/:ip/:bits", n.apiGetNetwork)
 }
 
-func (n *Networks) ShouldBeBlocked(ipd data.Stats) (block, next bool) {
-	block = false
-	next = true
-
-	return false, true
+// SetBlocker sets the instance through which it can block networks
+func (n *Networks) SetBlocker(b data.Blocker) {
+	n.blocker = b
 }
 
 func (n *Networks) update() {
-	n.mutex.RLock()
-	defer n.mutex.RUnlock()
 
-	asns := make(map[string]int)
-	nets := make(map[string]int)
+	asns := make(map[int]*data.ASNStats)
+	nets := make(map[string]*data.ASNStats)
 	var total int
 
+	requestLimit := n.config.MaxAppRequests
+
+	asnCounts := make(map[int]int)
+	netCounts := make(map[string]int)
+
+	n.mutex.RLock()
 	for _, nd := range n.data {
 		nd.expire()
 
 		total += nd.Total
 
-		if nd.Total > n.config.MaxAppRequests/2 && nd.Ratio > n.config.MaxRatio {
-			log.Infof("blocking ASN %d (%s): %d total, %d app, %f ratio", nd.ASN.ASN, nd.ASN.Organization, nd.Total, nd.App, nd.Ratio)
+		stats, exists := asns[nd.ASN.ASN]
+		if !exists {
+			asns[nd.ASN.ASN] = &data.ASNStats{
+				ASN: nd.ASN,
+			}
+			stats = asns[nd.ASN.ASN]
+			asnCounts[nd.ASN.ASN] = 0
 		}
+		stats.Total += nd.Total
+		stats.App += nd.App
+		stats.Other += nd.Other
+		stats.Ratio += nd.Ratio
+		asnCounts[nd.ASN.ASN]++
 
-		if nd.Total > n.config.MaxAppRequests/2 && nd.Ratio > n.config.MaxRatio {
-			log.Infof("blocking network %s (%s): %d total, %d app, %f ratio", nd.ASN.Cidr, nd.ASN.Organization, nd.Total, nd.App, nd.Ratio)
+		stats, exists = nets[nd.ASN.Cidr]
+		if !exists {
+			nets[nd.ASN.Cidr] = &data.ASNStats{
+				ASN: nd.ASN,
+			}
+			stats = nets[nd.ASN.Cidr]
+			netCounts[nd.ASN.Cidr] = 0
 		}
-
-		if _, ok := asns[nd.ASN.Organization]; !ok {
-			asns[nd.ASN.Organization] = 0
-		}
-		asns[nd.ASN.Organization] += nd.Total
-
-		if _, ok := nets[nd.ASN.Cidr]; !ok {
-			asns[nd.ASN.Cidr] = 0
-		}
-		nets[nd.ASN.Cidr] += nd.Total
-
+		stats.Total += nd.Total
+		stats.App += nd.App
+		stats.Other += nd.Other
+		stats.Ratio += nd.Ratio
+		netCounts[nd.ASN.Cidr]++
 	}
+	n.mutex.RUnlock()
+
+	for asn, stats := range asns {
+		c := asnCounts[asn]
+		if stats.Total > requestLimit && stats.Ratio/float64(c) > n.config.MaxRatio {
+
+			go n.blocker.BlockASN(data.BlockMessage{
+				ASN:       stats.ASN,
+				BlockedAt: time.Now(),
+				Reason:    fmt.Sprintf("asn has too many requests (%d/%d) and ratio is too high (%.2f/%.2f)", stats.Total/c, requestLimit, stats.Ratio/float64(c), n.config.MaxRatio),
+				Stats: data.Stats{
+					Total: stats.Total,
+					App:   stats.App,
+					Other: stats.Other,
+					Ratio: stats.Ratio / float64(c),
+				},
+			})
+		}
+	}
+
+	for network, stats := range nets {
+		c := netCounts[network]
+
+		if stats.Total > requestLimit && stats.Ratio/float64(c) > n.config.MaxRatio {
+			go n.blocker.BlockNetwork(data.NetworkBlockMessage{
+				Network: stats.ASN.Network,
+				BlockMessage: data.BlockMessage{
+					ASN:       stats.ASN,
+					BlockedAt: time.Now(),
+					Reason:    fmt.Sprintf("network has too many requests (%d/%d) and ratio is too high (%.2f/%.2f)", stats.Total/c, requestLimit, stats.Ratio/float64(c), n.config.MaxRatio),
+					Stats: data.Stats{
+						Total: stats.Total,
+						App:   stats.App,
+						Other: stats.Other,
+						Ratio: stats.Ratio / float64(c),
+					},
+				},
+			})
+		}
+	}
+
+	n.mutex.Lock()
+	defer n.mutex.Unlock()
 
 	n.asnData = asns
 	if l := len(asns); l > 0 {

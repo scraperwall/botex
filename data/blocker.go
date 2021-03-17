@@ -1,7 +1,7 @@
 package data
 
 type Blocker interface {
-	BlockASN(BlockMessage)
-	BlockIP(IPBlockMessage)
-	BlockNetwork(NetworkBlockMessage)
+	BlockASN(BlockMessage) error
+	BlockIP(IPBlockMessage) error
+	BlockNetwork(NetworkBlockMessage) error
 }

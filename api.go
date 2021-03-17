@@ -53,7 +53,7 @@ func (a *API) run() {
 func (a *API) getBlocked(c *gin.Context) {
 	blocked := make([]IPDetails, 0)
 
-	err := a.botex.resources.Store.Each([]byte(blockNamespace), []byte{}, func(v []byte) {
+	err := a.botex.resources.Store.Each([]byte(blockNamespace), func(v []byte) {
 		var ipd IPDetails
 		err := json.Unmarshal(v, &ipd)
 		blocked = append(blocked, ipd)

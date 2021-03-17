@@ -82,6 +82,7 @@ func New(ctx context.Context, config *config.Config) (*Botex, error) {
 	//
 	bopts := badger.DefaultOptions(config.BadgerPath)
 	bopts.SyncWrites = true
+	bopts.DetectConflicts = true
 	resources.Store, err = store.NewBadgerDB(ctx, config.BadgerPath)
 	if err != nil {
 		return nil, err
@@ -217,8 +218,6 @@ func New(ctx context.Context, config *config.Config) (*Botex, error) {
 		networksPlugin := plugins.NewNetworks(ctx, config)
 		b.Use(networksPlugin)
 
-		networksPlugin.APIHooks(b.api.router)
-
 		log.Infof("networks enabled")
 	}
 
@@ -233,6 +232,10 @@ func New(ctx context.Context, config *config.Config) (*Botex, error) {
 	// clean up when we're done
 	go func() {
 		<-ctx.Done()
+		err := b.resources.Store.Close()
+		if err != nil {
+			log.Warn(err)
+		}
 		close(resolvChan)
 		for _, subscr := range b.natsSubscriptions {
 			subscr.Drain()
@@ -247,6 +250,9 @@ func New(ctx context.Context, config *config.Config) (*Botex, error) {
 
 // Use adds a plugin to botex
 func (b *Botex) Use(p Plugin) {
+	p.SetBlocker(b.blocked)
+	p.APIHooks(b.api.router)
+
 	b.plugins = append(b.plugins, p)
 }
 
@@ -303,7 +309,7 @@ func (b *Botex) blockWorker() {
 				},
 			}
 			if err := b.blocked.BlockIP(msg); err != nil {
-				log.Errorf("failed to write blocked IP %s to kvstore: %s", block.IP, err)
+				log.Errorf("failed to write blocked IP %s to store: %s", block.IP, err)
 			}
 			block.IsBlocked = true
 		}
