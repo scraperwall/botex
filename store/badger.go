@@ -243,11 +243,3 @@ func (bdb *BadgerDB) Count(prefix []byte) (int, error) {
 func (bdb *BadgerDB) ErrNotFound() error {
 	return badger.ErrKeyNotFound
 }
-
-// badgerNamespaceKey returns a composite key used for lookup and storage for a
-// given namespace and key.
-/*
-func (bdb *BadgerDB) badgerNamespaceKey(namespace, key []byte) []byte {
-	return []byte(fmt.Sprintf("%s/%s", string(namespace), string(key)))
-}
-*/
