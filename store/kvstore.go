@@ -9,10 +9,10 @@ type KVStoreEachFunc func([]byte)
 
 // KVStore defines an embedded key/value store database interface.
 type KVStore interface {
-	Get(prefix []byte) (value []byte, err error)
-	SetEx(prefix, value []byte, ttl time.Duration) error
-	Set(prefix, value []byte) error
-	Has(prefix []byte) (bool, error)
+	Get(key []byte) (value []byte, err error)
+	SetEx(key, value []byte, ttl time.Duration) error
+	Set(key, value []byte) error
+	Has(key []byte) (bool, error)
 	All(prefix []byte) ([][]byte, error)
 	Count(prefix []byte) (int, error)
 	Remove(prefix []byte) error
