@@ -36,8 +36,8 @@ type IPDetails struct {
 // It handles updating the aggregated stats when it receives new requests
 type IPData struct {
 	IPDetails
-	Requests   *Requests
-	updateChan chan data.Stats
+	Requests     *Requests
+	ipUpdateChan chan data.IPStats
 
 	resources *Resources
 	config    *config.Config
@@ -46,7 +46,7 @@ type IPData struct {
 
 // NewIPData creates a new IPData item fro a given IP.
 // the parent context and app configuration are passed on from the parent
-func NewIPData(updateChan chan data.Stats, ip net.IP, resources *Resources, config *config.Config) *IPData {
+func NewIPData(updateChan chan data.IPStats, ip net.IP, resources *Resources, config *config.Config) *IPData {
 	asn := resources.ASNDB.Lookup(ip)
 	geo, _ := resources.GEOIPDB.Lookup(ip)
 
@@ -63,11 +63,11 @@ func NewIPData(updateChan chan data.Stats, ip net.IP, resources *Resources, conf
 			CreatedAt: time.Now(),
 			UpdatedAt: time.Unix(0, 0),
 		},
-		resources:  resources,
-		config:     config,
-		updateChan: updateChan,
-		mutex:      sync.RWMutex{},
-		Requests:   NewRequests(ip, updateChan, config),
+		resources:    resources,
+		config:       config,
+		ipUpdateChan: updateChan,
+		mutex:        sync.RWMutex{},
+		Requests:     NewRequests(ip, updateChan, config),
 	}
 
 	return ipd
@@ -80,7 +80,7 @@ func (ipd *IPData) Add(r *data.Request) {
 }
 
 // Update sets the cached statistics numbers using an IPStats item
-func (ipd *IPData) Update(stats data.Stats) {
+func (ipd *IPData) Update(stats data.IPStats) {
 	ipd.Total = stats.Total
 	ipd.App = stats.App
 	ipd.Other = stats.Other
@@ -102,12 +102,14 @@ func (ipd *IPData) SetHostname(hostname string) {
 		return
 	}
 	ipd.Hostname = hostname
-	ipd.updateChan <- data.Stats{
-		IP:    ipd.IP,
-		Total: ipd.Total,
-		App:   ipd.App,
-		Other: ipd.Other,
-		Ratio: ipd.Ratio,
+	ipd.ipUpdateChan <- data.IPStats{
+		IP: ipd.IP,
+		Stats: data.Stats{
+			Total: ipd.Total,
+			App:   ipd.App,
+			Other: ipd.Other,
+			Ratio: ipd.Ratio,
+		},
 	}
 }
 

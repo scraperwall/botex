@@ -320,11 +320,11 @@ func (n *Networks) Get(ipn *net.IPNet) (nd *NetworkData, found bool) {
 }
 
 // Averages returns the average of requests across all networks
-func (n *Networks) Averages() data.Stats {
+func (n *Networks) Averages() data.NetworkStats {
 	n.mutex.RLock()
 	defer n.mutex.RUnlock()
 
-	res := data.Stats{}
+	res := data.NetworkStats{}
 
 	count := 0
 	ncount := 0.0
@@ -383,6 +383,14 @@ func (n *Networks) update() {
 		nd.expire()
 
 		total += nd.Total
+
+		if nd.Total > n.config.MaxAppRequests/2 && nd.Ratio > n.config.MaxRatio {
+			log.Infof("blocking ASN %d (%s): %d total, %d app, %f ratio", nd.ASN.ASN, nd.ASN.Organization, nd.Total, nd.App, nd.Ratio)
+		}
+
+		if nd.Total > n.config.MaxAppRequests/2 && nd.Ratio > n.config.MaxRatio {
+			log.Infof("blocking network %s (%s): %d total, %d app, %f ratio", nd.ASN.Cidr, nd.ASN.Organization, nd.Total, nd.App, nd.Ratio)
+		}
 
 		if _, ok := asns[nd.ASN.Organization]; !ok {
 			asns[nd.ASN.Organization] = 0

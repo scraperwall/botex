@@ -13,25 +13,25 @@ import (
 
 // History is the history of all IPs for which the application has received a request
 type History struct {
-	config     *config.Config
-	resources  *Resources
-	data       map[string]*IPData
-	mutex      sync.RWMutex
-	windowSize time.Duration
-	numWindows int
-	updateChan chan data.Stats
+	config       *config.Config
+	resources    *Resources
+	data         map[string]*IPData
+	mutex        sync.RWMutex
+	windowSize   time.Duration
+	numWindows   int
+	ipUpdateChan chan data.IPStats
 }
 
 // NewHistory creates a new History item and passes on the context and configuration from its parent
 func NewHistory(ctx context.Context, resources *Resources, config *config.Config) *History {
 	h := History{
-		config:     config,
-		resources:  resources,
-		data:       make(map[string]*IPData),
-		windowSize: config.WindowSize,
-		numWindows: config.NumWindows,
-		updateChan: make(chan data.Stats),
-		mutex:      sync.RWMutex{},
+		config:       config,
+		resources:    resources,
+		data:         make(map[string]*IPData),
+		windowSize:   config.WindowSize,
+		numWindows:   config.NumWindows,
+		ipUpdateChan: make(chan data.IPStats),
+		mutex:        sync.RWMutex{},
 	}
 
 	go func() {
@@ -45,7 +45,7 @@ func NewHistory(ctx context.Context, resources *Resources, config *config.Config
 				return
 			case <-ticker.C:
 				h.expire()
-			case stats := <-h.updateChan:
+			case stats := <-h.ipUpdateChan:
 				// log.Infof("received IPStats for %s - total: %d, app: %d, other: %d, ratio: %.2f", stats.IP, stats.Total, stats.App, stats.Other, stats.Ratio)
 				h.update(stats)
 			}
@@ -68,7 +68,7 @@ func (h *History) expire() {
 }
 
 // update updates the cached stats for an IP
-func (h *History) update(stats data.Stats) {
+func (h *History) update(stats data.IPStats) {
 	log.Tracef("History update before Lock()")
 
 	log.Tracef("History update before ipd.Update")
@@ -94,7 +94,7 @@ func (h *History) Add(r *data.Request) bool {
 
 	h.mutex.Lock()
 	if _, ok := h.data[ipstr]; !ok {
-		h.data[ipstr] = NewIPData(h.updateChan, ip, h.resources, h.config)
+		h.data[ipstr] = NewIPData(h.ipUpdateChan, ip, h.resources, h.config)
 		newIP = true
 	}
 	h.mutex.Unlock()
@@ -141,8 +141,8 @@ func (h *History) Size() int {
 }
 
 // TotalStats returns the sum of the stats for all IPs
-func (h *History) TotalStats() data.Stats {
-	stats := data.Stats{}
+func (h *History) TotalStats() data.IPStats {
+	stats := data.IPStats{}
 
 	h.mutex.RLock()
 	defer h.mutex.RUnlock()
