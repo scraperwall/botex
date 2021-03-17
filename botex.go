@@ -284,9 +284,28 @@ func (b *Botex) blockWorker() {
 		case <-b.ctx.Done():
 			return
 		case block := <-b.resources.BlockChan:
-			if err := b.blocked.BlockIP(block); err != nil {
+			if block.IsBlocked {
+				continue
+			}
+			msg := data.IPBlockMessage{
+				IP:       block.IP,
+				Hostname: block.Hostname,
+				BlockMessage: data.BlockMessage{
+					ASN:       block.ASN,
+					Reason:    block.BlockReason,
+					BlockedAt: time.Now(),
+					Stats: data.Stats{
+						Total: block.Total,
+						App:   block.App,
+						Other: block.Other,
+						Ratio: block.Ratio,
+					},
+				},
+			}
+			if err := b.blocked.BlockIP(msg); err != nil {
 				log.Errorf("failed to write blocked IP %s to kvstore: %s", block.IP, err)
 			}
+			block.IsBlocked = true
 		}
 	}
 }

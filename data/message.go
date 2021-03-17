@@ -10,20 +10,17 @@ import (
 type BlockMessage struct {
 	Stats
 	Reason    string
+	ASN       *asndb.ASN
 	BlockedAt time.Time
 }
 
 type IPBlockMessage struct {
 	BlockMessage
-	IP net.IP
+	IP       net.IP
+	Hostname string
 }
 
 type NetworkBlockMessage struct {
 	BlockMessage
 	Network *net.IPNet
-}
-
-type ASNBlockMessage struct {
-	BlockMessage
-	ASN *asndb.ASN
 }

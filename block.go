@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/scraperwall/asndb/v2"
+	"github.com/scraperwall/botex/data"
 	log "github.com/sirupsen/logrus"
 )
 
@@ -57,20 +58,14 @@ func (b *Block) CountIPs() int {
 
 // BlockIP writes an IPs details to the blocklist.
 // It returns an error if writing the information failed
-func (b *Block) BlockIP(ipd *IPDetails) error {
-	if ipd == nil {
-		return errors.New("IPDetails are nil")
+func (b *Block) BlockIP(msg data.IPBlockMessage) error {
+	if msg.IP == nil {
+		return errors.New("IP is nil")
 	}
 
-	if ipd.IsBlocked {
-		return nil
-	}
+	log.Infof("blocking %s  - %s (%s)", msg.IP, msg.Hostname, msg.Reason)
 
-	log.Tracef("blocking %s  - %s (%s)", ipd.IP, ipd.Hostname, ipd.BlockReason)
-
-	ipd.IsBlocked = true
-
-	data, err := b.resources.Store.Get(b.ipNamespace(), ipd.IP)
+	data, err := b.resources.Store.Get(b.ipNamespace(), msg.IP)
 	if err != nil && err != b.resources.Store.ErrNotFound() {
 		return err
 	}
@@ -81,11 +76,11 @@ func (b *Block) BlockIP(ipd *IPDetails) error {
 	}
 
 	// write the IP to the kvstore
-	data, err = json.Marshal(ipd)
+	data, err = json.Marshal(msg)
 	if err != nil {
 		return err
 	}
-	return b.resources.Store.SetEx(b.ipNamespace(), ipd.IP, data, b.blockTTL)
+	return b.resources.Store.SetEx(b.ipNamespace(), msg.IP, data, b.blockTTL)
 }
 
 // RemoveIP removes an IP from the blocklist
