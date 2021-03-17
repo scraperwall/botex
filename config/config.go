@@ -33,4 +33,5 @@ type Config struct {
 	LogMemoryStats  bool
 	WhitelistTOML   string
 	WithNetworks    bool
+	ClearBlocked    bool
 }

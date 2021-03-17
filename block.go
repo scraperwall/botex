@@ -278,6 +278,11 @@ func (b *Block) AllASNs() ([]asndb.ASN, error) {
 	return res, nil
 }
 
+// Clear removes all currently blocked items from the store
+func (b *Block) Clear() {
+	b.resources.Store.Remove([]byte(blockNamespace), []byte{})
+}
+
 // cleanup unblocks every IP that has been whitelisted since it was written to the blocklist
 func (b *Block) cleanup() {
 	ticker := time.NewTicker(time.Minute)

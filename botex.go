@@ -182,6 +182,11 @@ func New(ctx context.Context, config *config.Config) (*Botex, error) {
 		ctx:               ctx,
 	}
 
+	// clear blocked items
+	if config.ClearBlocked {
+		b.blocked.Clear()
+	}
+
 	// NATS subscriptions
 	reqSubscription, err := jsonc.Subscribe(natsRequestsSubject, b.HandleRequest)
 	if err != nil {

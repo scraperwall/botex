@@ -68,6 +68,7 @@ func main() {
 	flag.BoolVar(&config.LogMemoryStats, "log-memory-stats", false, "regularly log the memory consumption of the program")
 	flag.StringVar(&config.WhitelistTOML, "whitelist", "./etc/whitelist.toml", "the whitelist configuration file")
 	flag.BoolVar(&config.WithNetworks, "networks", false, "analyze requests on a per-network basis")
+	flag.BoolVar(&config.ClearBlocked, "clear-blocked", false, "removes all blocked items from the database")
 
 	flag.Parse()
 
