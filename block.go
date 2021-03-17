@@ -52,7 +52,7 @@ func NewBlock(ctx context.Context, recheckChan chan bool, resources *Resources, 
 
 // CountIPs returns the number of currently blocked IPs
 func (b *Block) CountIPs() int {
-	c, _ := b.resources.Store.Count(b.ipNamespace([]byte{}))
+	c, _ := b.resources.Store.Count(b.IPNamespace([]byte{}))
 	return c
 }
 
@@ -65,7 +65,7 @@ func (b *Block) BlockIP(msg data.IPBlockMessage) error {
 
 	log.Tracef("blocking %s  - %s (%s)", msg.IP, msg.Hostname, msg.Reason)
 
-	data, err := b.resources.Store.Get(b.ipNamespace(msg.IP))
+	data, err := b.resources.Store.Get(b.IPNamespace(msg.IP))
 	if err != nil && err != b.resources.Store.ErrNotFound() {
 		return err
 	}
@@ -80,18 +80,18 @@ func (b *Block) BlockIP(msg data.IPBlockMessage) error {
 	if err != nil {
 		return err
 	}
-	return b.resources.Store.SetEx(b.ipNamespace(msg.IP), data, b.blockTTL)
+	return b.resources.Store.SetEx(b.IPNamespace(msg.IP), data, b.blockTTL)
 }
 
 // RemoveIP removes an IP from the blocklist
 func (b *Block) RemoveIP(ip net.IP) error {
 	log.Tracef("removing %s from the blocklist", ip)
-	return b.resources.Store.Remove(b.ipNamespace(ip))
+	return b.resources.Store.Remove(b.IPNamespace(ip))
 }
 
 // GetIP retrieves an IPDetails item about a blocked IP. If the IP isn't blocked an error is returned
 func (b *Block) GetIP(ip net.IP) (*IPDetails, error) {
-	data, err := b.resources.Store.Get(b.ipNamespace(ip))
+	data, err := b.resources.Store.Get(b.IPNamespace(ip))
 	if err != nil {
 		return nil, err
 	}
@@ -101,9 +101,25 @@ func (b *Block) GetIP(ip net.IP) (*IPDetails, error) {
 	return &ipd, err
 }
 
+func (b *Block) BlockedIPs() []data.IPBlockMessage {
+	res := make([]data.IPBlockMessage, 0)
+
+	b.resources.Store.Each(b.IPNamespace([]byte{}), func(jsonData []byte) {
+		var msg data.IPBlockMessage
+		err := json.Unmarshal(jsonData, &msg)
+		if err != nil {
+			log.Warn(err)
+			return
+		}
+		res = append(res, msg)
+	})
+
+	return res
+}
+
 // AllIPs returns all currently blocked IPs
 func (b *Block) AllIPs() ([]*IPDetails, error) {
-	data, err := b.resources.Store.All(b.ipNamespace([]byte{}))
+	data, err := b.resources.Store.All(b.IPNamespace([]byte{}))
 	if err != nil {
 		return nil, err
 	}
@@ -123,7 +139,7 @@ func (b *Block) AllIPs() ([]*IPDetails, error) {
 
 // CountNetworks returns the number of currently blocked networks
 func (b *Block) CountNetworks() int {
-	c, _ := b.resources.Store.Count(b.cidrNamespace(""))
+	c, _ := b.resources.Store.Count(b.CIDRNamespace(""))
 	return c
 }
 
@@ -141,7 +157,7 @@ func (b *Block) BlockNetwork(msg data.NetworkBlockMessage) error {
 	log.Tracef("blocking network %s (%s): total: %d, app: %d, ratio: %.2f", msg.Network, msg.ASN.Organization, msg.Total, msg.App, msg.Ratio)
 	b.cacheBlockedNetwork(msg.Network)
 
-	data, err := b.resources.Store.Get(b.cidrNamespace(msg.Network.String()))
+	data, err := b.resources.Store.Get(b.CIDRNamespace(msg.Network.String()))
 	if err != nil && err != b.resources.Store.ErrNotFound() {
 		return err
 	}
@@ -156,18 +172,18 @@ func (b *Block) BlockNetwork(msg data.NetworkBlockMessage) error {
 	if err != nil {
 		return err
 	}
-	return b.resources.Store.SetEx(b.cidrNamespace(msg.Network.String()), data, b.blockTTL)
+	return b.resources.Store.SetEx(b.CIDRNamespace(msg.Network.String()), data, b.blockTTL)
 }
 
 // RemoveNetwork removes a network from the blocklist
 func (b *Block) RemoveNetwork(network net.IPNet) error {
 	log.Tracef("removing network %s from the blocklist", network)
-	return b.resources.Store.Remove(b.cidrNamespace(network.String()))
+	return b.resources.Store.Remove(b.CIDRNamespace(network.String()))
 }
 
 // GetNetworkretrieves an IPDetails item about a blocked IP. If the IP isn't blocked an error is returned
 func (b *Block) GetNetwork(network net.IPNet) (*net.IPNet, error) {
-	data, err := b.resources.Store.Get(b.cidrNamespace(network.String()))
+	data, err := b.resources.Store.Get(b.CIDRNamespace(network.String()))
 	if err != nil {
 		return nil, err
 	}
@@ -179,7 +195,7 @@ func (b *Block) GetNetwork(network net.IPNet) (*net.IPNet, error) {
 
 // AllNetworks returns all currently blocked IPs
 func (b *Block) AllNetworks() ([]net.IPNet, error) {
-	data, err := b.resources.Store.All(b.cidrNamespace(""))
+	data, err := b.resources.Store.All(b.CIDRNamespace(""))
 	if err != nil {
 		return nil, err
 	}
@@ -197,9 +213,25 @@ func (b *Block) AllNetworks() ([]net.IPNet, error) {
 	return res, nil
 }
 
+func (b *Block) BlockedNetworks() []data.NetworkBlockMessage {
+	res := make([]data.NetworkBlockMessage, 0)
+
+	b.resources.Store.Each(b.CIDRNamespace(""), func(jsonData []byte) {
+		var msg data.NetworkBlockMessage
+		err := json.Unmarshal(jsonData, &msg)
+		if err != nil {
+			log.Warn(err)
+			return
+		}
+		res = append(res, msg)
+	})
+
+	return res
+}
+
 // CountASNs returns the number of currently blocked networks
 func (b *Block) CountASNs() int {
-	c, _ := b.resources.Store.Count(b.asnNamespace(-1))
+	c, _ := b.resources.Store.Count(b.ASNNamespace(-1))
 	return c
 }
 
@@ -217,7 +249,7 @@ func (b *Block) BlockASN(msg data.BlockMessage) error {
 	log.Infof("blocking asn %d (%s): total: %d, app: %d, ratio: %.2f", msg.ASN.ASN, msg.ASN.Organization, msg.Total, msg.App, msg.Ratio)
 	b.cacheBlockedASN(msg.ASN)
 
-	data, err := b.resources.Store.Get(b.asnNamespace(msg.ASN.ASN))
+	data, err := b.resources.Store.Get(b.ASNNamespace(msg.ASN.ASN))
 	if err != nil && err != b.resources.Store.ErrNotFound() {
 		return err
 	}
@@ -232,18 +264,18 @@ func (b *Block) BlockASN(msg data.BlockMessage) error {
 	if err != nil {
 		return err
 	}
-	return b.resources.Store.SetEx(b.asnNamespace(msg.ASN.ASN), data, b.blockTTL)
+	return b.resources.Store.SetEx(b.ASNNamespace(msg.ASN.ASN), data, b.blockTTL)
 }
 
 // RemoveNetwork removes a network from the blocklist
 func (b *Block) RemoveASN(asn *asndb.ASN) error {
 	log.Infof("removing asn %d (%s) from the blocklist", asn.ASN, asn.Organization)
-	return b.resources.Store.Remove(b.asnNamespace(asn.ASN))
+	return b.resources.Store.Remove(b.ASNNamespace(asn.ASN))
 }
 
 // GetASN retrieves a blocked ASN. If the aSN isn't blocked an error is returned
 func (b *Block) GetASN(asn *asndb.ASN) (*asndb.ASN, error) {
-	data, err := b.resources.Store.Get(b.asnNamespace(asn.ASN))
+	data, err := b.resources.Store.Get(b.ASNNamespace(asn.ASN))
 	if err != nil {
 		return nil, err
 	}
@@ -255,7 +287,7 @@ func (b *Block) GetASN(asn *asndb.ASN) (*asndb.ASN, error) {
 
 // AllASNs returns all currently blocked IPs
 func (b *Block) AllASNs() ([]asndb.ASN, error) {
-	data, err := b.resources.Store.All(b.asnNamespace(-1))
+	data, err := b.resources.Store.All(b.ASNNamespace(-1))
 	if err != nil {
 		return nil, err
 	}
@@ -271,6 +303,22 @@ func (b *Block) AllASNs() ([]asndb.ASN, error) {
 	}
 
 	return res, nil
+}
+
+func (b *Block) BlockedASNs() []data.BlockMessage {
+	res := make([]data.BlockMessage, 0)
+
+	b.resources.Store.Each(b.ASNNamespace(-1), func(jsonData []byte) {
+		var msg data.BlockMessage
+		err := json.Unmarshal(jsonData, &msg)
+		if err != nil {
+			log.Warn(err)
+			return
+		}
+		res = append(res, msg)
+	})
+
+	return res
 }
 
 // Clear removes all currently blocked items from the store
@@ -298,7 +346,7 @@ func (b *Block) cleanup() {
 			b.buildCache()
 		case <-b.recheckChan:
 			var ipd IPDetails
-			b.resources.Store.Each(b.ipNamespace([]byte{}), func(v []byte) {
+			b.resources.Store.Each(b.IPNamespace([]byte{}), func(v []byte) {
 				err := json.Unmarshal(v, &ipd)
 				if err != nil {
 					log.Warn("failed to unmarshal blocked IP for blocklist recheck")
@@ -312,18 +360,18 @@ func (b *Block) cleanup() {
 	}
 }
 
-func (b *Block) ipNamespace(ip []byte) []byte {
+func (b *Block) IPNamespace(ip []byte) []byte {
 	return []byte(fmt.Sprintf("%s:%s:%s", blockNamespace, "ip", ip))
 }
 
-func (b *Block) asnNamespace(asn int) []byte {
+func (b *Block) ASNNamespace(asn int) []byte {
 	if asn > 0 {
 		return []byte(fmt.Sprintf("%s:%s:%d", blockNamespace, "asn", asn))
 	}
 	return []byte(fmt.Sprintf("%s:%s", blockNamespace, "asn"))
 }
 
-func (b *Block) cidrNamespace(cidr string) []byte {
+func (b *Block) CIDRNamespace(cidr string) []byte {
 	return []byte(fmt.Sprintf("%s:%s:%s", blockNamespace, "cidr", cidr))
 }
 

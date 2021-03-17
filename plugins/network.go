@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net"
 	"net/http"
+	"sort"
 	"sync"
 	"time"
 
@@ -363,6 +364,8 @@ func (n *Networks) APIHooks(r *gin.Engine) {
 	}
 	r.GET("/networks", n.apiGetNetworks)
 	r.GET("/network/:ip/:bits", n.apiGetNetwork)
+	r.GET("/blocked/networks", n.apiGetBlockedNetworks)
+	r.GET("/blocked/asns", n.apiGetBlockedASNs)
 }
 
 // SetBlocker sets the instance through which it can block networks
@@ -477,6 +480,26 @@ func (n *Networks) update() {
 func (n *Networks) logStats() {
 	avgs := n.Averages()
 	log.Infof("networks: %d, total: %d, app: %d, other: %d, ratio: %.2f, asn avg: %d, net avg: %d", n.Count(), avgs.Total, avgs.App, avgs.Other, avgs.Ratio, n.asnAverage, n.netAverage)
+}
+
+func (n *Networks) apiGetBlockedNetworks(c *gin.Context) {
+	blocked := n.blocker.BlockedNetworks()
+
+	sort.Slice(blocked, func(a, b int) bool {
+		return blocked[a].Total > blocked[b].Total
+	})
+
+	c.JSON(http.StatusOK, blocked)
+}
+
+func (n *Networks) apiGetBlockedASNs(c *gin.Context) {
+	blocked := n.blocker.BlockedASNs()
+
+	sort.Slice(blocked, func(a, b int) bool {
+		return blocked[a].Total > blocked[b].Total
+	})
+
+	c.JSON(http.StatusOK, blocked)
 }
 
 func (n *Networks) apiGetNetworks(c *gin.Context) {

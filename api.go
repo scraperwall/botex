@@ -44,17 +44,17 @@ func (a *API) run() {
 	corsConfig.AllowAllOrigins = true
 	a.router.Use(cors.New(corsConfig))
 
-	a.router.GET("/blocked", a.getBlocked)
+	a.router.GET("/blocked/ips", a.getBlockedIPs)
 	a.router.GET("/ip/:ip", a.getIP)
 
 	go endless.ListenAndServe(a.config.APIAddress, a.router)
 }
 
-func (a *API) getBlocked(c *gin.Context) {
-	blocked := make([]IPDetails, 0)
+func (a *API) getBlockedIPs(c *gin.Context) {
+	blocked := make([]data.IPBlockMessage, 0)
 
-	err := a.botex.resources.Store.Each([]byte(blockNamespace), func(v []byte) {
-		var ipd IPDetails
+	err := a.botex.resources.Store.Each(a.botex.blocked.IPNamespace([]byte{}), func(v []byte) {
+		var ipd data.IPBlockMessage
 		err := json.Unmarshal(v, &ipd)
 		blocked = append(blocked, ipd)
 		if err != nil {
