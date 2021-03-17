@@ -27,7 +27,7 @@ type Requests struct {
 	allWindow          *Window
 	userAgents         *MapWindow
 	latest             *RequestsWindow
-	updateChan         chan data.IPStats
+	updateChan         chan data.Stats
 	updateChanIsClosed bool
 	mutex              sync.RWMutex
 	createdAt          time.Time
@@ -37,7 +37,7 @@ type Requests struct {
 
 // NewRequests creates a new Requests item.
 // The app context and configuration get passed into the new item
-func NewRequests(ip net.IP, updateChan chan data.IPStats, config *config.Config) *Requests {
+func NewRequests(ip net.IP, updateChan chan data.Stats, config *config.Config) *Requests {
 	reqs := &Requests{
 		IP:                 ip,
 		appWindow:          NewWindow(config.WindowSize, config.NumWindows),
@@ -156,7 +156,7 @@ func (r *Requests) Add(req *data.Request) {
 		ratio = float64(app) / float64(total)
 	}
 
-	stats := data.IPStats{
+	stats := data.Stats{
 		IP:    r.IP,
 		Total: int(total),
 		App:   int(app),

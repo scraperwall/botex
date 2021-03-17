@@ -2,6 +2,7 @@ package plugins
 
 import (
 	"context"
+	"encoding/binary"
 	"fmt"
 	"net"
 	"net/http"
@@ -20,6 +21,10 @@ import (
 // Networks contains requests statistics for all networks
 type Networks struct {
 	data       map[string]*NetworkData
+	asnData    map[string]int
+	asnAverage int
+	netData    map[string]int
+	netAverage int
 	mutex      sync.RWMutex
 	removeChan chan *net.IPNet
 	windowSize time.Duration
@@ -73,10 +78,8 @@ func NewNetworkData(ctx context.Context, ipnet *net.IPNet, removeChan chan *net.
 		for {
 			select {
 			case <-ctx.Done():
-				if nd.expireTimer != nil {
-					nd.expireTimer.Stop()
-					nd.expireTimer = nil
-				}
+				nd.expireTimer.Stop()
+				nd.expireTimer = nil
 
 				nd.totalMap = nil
 				nd.appMap = nil
@@ -135,6 +138,23 @@ func (nd *NetworkData) HandleRequest(r *data.Request) {
 	} else {
 		nd.expireTimer = time.NewTimer(nd.windowSize * time.Duration(nd.numWindows))
 	}
+}
+
+func (nd *NetworkData) NumberOfIPs() uint32 {
+	if len(nd.ASN.Network.Mask) <= 0 {
+		return 0
+	}
+
+	ones := make([]byte, 4)
+	pos := 3
+
+	l := len(nd.ASN.Network.Mask)
+	for i := l - 1; i > l-4; i-- {
+		ones[pos] = ^nd.ASN.Network.Mask[i]
+		pos--
+	}
+
+	return binary.BigEndian.Uint32(ones)
 }
 
 func (nd *NetworkData) updateStats() {
@@ -229,7 +249,7 @@ func NewNetworks(ctx context.Context, config *config.Config) *Networks {
 			case network := <-n.removeChan:
 				n.Remove(network)
 			case <-ticker.C:
-				n.expire()
+				n.update()
 				n.logStats()
 			}
 		}
@@ -300,18 +320,27 @@ func (n *Networks) Get(ipn *net.IPNet) (nd *NetworkData, found bool) {
 }
 
 // Averages returns the average of requests across all networks
-func (n *Networks) Averages() data.IPStats {
+func (n *Networks) Averages() data.Stats {
 	n.mutex.RLock()
 	defer n.mutex.RUnlock()
 
-	res := data.IPStats{}
+	res := data.Stats{}
 
 	count := 0
+	ncount := 0.0
 
 	for _, nd := range n.data {
 		res.Total += nd.Total
 		res.App += nd.App
 		res.Other += nd.Other
+		res.NetworkSize += uint64(nd.NumberOfIPs())
+
+		if nd.NumberOfIPs() > 0 {
+			ratio := (float64(nd.Total) / float64(nd.NumberOfIPs()))
+			res.NetworkRatio += ratio
+			// log.Infof("network %s (%s) - ratio: %f, IPs: %d, app: %d", nd.ASN.Network, nd.ASN.Organization, ratio, nd.NumberOfIPs(), nd.Total)
+			ncount++
+		}
 		count++
 	}
 
@@ -320,35 +349,71 @@ func (n *Networks) Averages() data.IPStats {
 		res.App = res.App / count
 		res.Other = res.Other / count
 		res.Ratio = float64(res.App) / float64(res.Total)
+		res.NetworkSize = res.NetworkSize / uint64(count)
+		res.NetworkRatio = res.NetworkRatio / ncount
 	}
 
 	return res
 }
 
 func (n *Networks) APIHooks(r *gin.Engine) {
+	if r == nil {
+		log.Fatal("gin router is nil")
+	}
 	r.GET("/networks", n.apiGetNetworks)
 	r.GET("/network/:ip/:bits", n.apiGetNetwork)
 }
 
-func (n *Networks) ShouldBeBlocked(ipd data.IPStats) (block, next bool) {
+func (n *Networks) ShouldBeBlocked(ipd data.Stats) (block, next bool) {
 	block = false
 	next = true
 
 	return false, true
 }
 
-func (n *Networks) expire() {
+func (n *Networks) update() {
 	n.mutex.RLock()
 	defer n.mutex.RUnlock()
 
+	asns := make(map[string]int)
+	nets := make(map[string]int)
+	var total int
+
 	for _, nd := range n.data {
 		nd.expire()
+
+		total += nd.Total
+
+		if _, ok := asns[nd.ASN.Organization]; !ok {
+			asns[nd.ASN.Organization] = 0
+		}
+		asns[nd.ASN.Organization] += nd.Total
+
+		if _, ok := nets[nd.ASN.Cidr]; !ok {
+			asns[nd.ASN.Cidr] = 0
+		}
+		nets[nd.ASN.Cidr] += nd.Total
+
+	}
+
+	n.asnData = asns
+	if l := len(asns); l > 0 {
+		n.asnAverage = total / l
+	} else {
+		n.asnAverage = 0
+	}
+
+	n.netData = nets
+	if l := len(nets); l > 0 {
+		n.netAverage = total / l
+	} else {
+		n.netAverage = 0
 	}
 }
 
 func (n *Networks) logStats() {
 	avgs := n.Averages()
-	log.Infof("networks: %d, total: %d, app: %d, other: %d, ratio: %.2f", n.Count(), avgs.Total, avgs.App, avgs.Other, avgs.Ratio)
+	log.Infof("networks: %d, total: %d, app: %d, other: %d, ratio: %.2f, asn avg: %d, net avg: %d", n.Count(), avgs.Total, avgs.App, avgs.Other, avgs.Ratio, n.asnAverage, n.netAverage)
 }
 
 func (n *Networks) apiGetNetworks(c *gin.Context) {

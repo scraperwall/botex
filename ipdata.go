@@ -37,7 +37,7 @@ type IPDetails struct {
 type IPData struct {
 	IPDetails
 	Requests   *Requests
-	updateChan chan data.IPStats
+	updateChan chan data.Stats
 
 	resources *Resources
 	config    *config.Config
@@ -46,7 +46,7 @@ type IPData struct {
 
 // NewIPData creates a new IPData item fro a given IP.
 // the parent context and app configuration are passed on from the parent
-func NewIPData(updateChan chan data.IPStats, ip net.IP, resources *Resources, config *config.Config) *IPData {
+func NewIPData(updateChan chan data.Stats, ip net.IP, resources *Resources, config *config.Config) *IPData {
 	asn := resources.ASNDB.Lookup(ip)
 	geo, _ := resources.GEOIPDB.Lookup(ip)
 
@@ -80,7 +80,7 @@ func (ipd *IPData) Add(r *data.Request) {
 }
 
 // Update sets the cached statistics numbers using an IPStats item
-func (ipd *IPData) Update(stats data.IPStats) {
+func (ipd *IPData) Update(stats data.Stats) {
 	ipd.Total = stats.Total
 	ipd.App = stats.App
 	ipd.Other = stats.Other
@@ -102,7 +102,7 @@ func (ipd *IPData) SetHostname(hostname string) {
 		return
 	}
 	ipd.Hostname = hostname
-	ipd.updateChan <- data.IPStats{
+	ipd.updateChan <- data.Stats{
 		IP:    ipd.IP,
 		Total: ipd.Total,
 		App:   ipd.App,

@@ -19,7 +19,7 @@ type History struct {
 	mutex      sync.RWMutex
 	windowSize time.Duration
 	numWindows int
-	updateChan chan data.IPStats
+	updateChan chan data.Stats
 }
 
 // NewHistory creates a new History item and passes on the context and configuration from its parent
@@ -30,7 +30,7 @@ func NewHistory(ctx context.Context, resources *Resources, config *config.Config
 		data:       make(map[string]*IPData),
 		windowSize: config.WindowSize,
 		numWindows: config.NumWindows,
-		updateChan: make(chan data.IPStats),
+		updateChan: make(chan data.Stats),
 		mutex:      sync.RWMutex{},
 	}
 
@@ -68,7 +68,7 @@ func (h *History) expire() {
 }
 
 // update updates the cached stats for an IP
-func (h *History) update(stats data.IPStats) {
+func (h *History) update(stats data.Stats) {
 	log.Tracef("History update before Lock()")
 
 	log.Tracef("History update before ipd.Update")
@@ -141,8 +141,8 @@ func (h *History) Size() int {
 }
 
 // TotalStats returns the sum of the stats for all IPs
-func (h *History) TotalStats() data.IPStats {
-	stats := data.IPStats{}
+func (h *History) TotalStats() data.Stats {
+	stats := data.Stats{}
 
 	h.mutex.RLock()
 	defer h.mutex.RUnlock()

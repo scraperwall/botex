@@ -18,7 +18,7 @@ import (
 // API provides the HTTP REST API for botex
 type API struct {
 	botex     *Botex
-	engine    *gin.Engine
+	router    *gin.Engine
 	config    *config.Config
 	resources *Resources
 	ctx       context.Context
@@ -32,27 +32,22 @@ func NewAPI(ctx context.Context, config *config.Config, botex *Botex) (api *API,
 		botex:  botex,
 	}
 
-	go api.run()
+	api.run()
 
 	return api, nil
 }
 
 func (a *API) run() {
-	r := gin.Default()
+	a.router = gin.Default()
+
 	corsConfig := cors.DefaultConfig()
 	corsConfig.AllowAllOrigins = true
-	r.Use(cors.New(corsConfig))
-	a.engine = r
-	r.GET("/blocked", a.getBlocked)
-	r.GET("/ip/:ip", a.getIP)
-	/*
-		if a.config.WithNetworks {
-			r.GET("/networks", a.getNetworks)
-			r.GET("/network/:ip/:bits", a.getNetwork)
-		}
-	*/
+	a.router.Use(cors.New(corsConfig))
 
-	endless.ListenAndServe(a.config.APIAddress, r)
+	a.router.GET("/blocked", a.getBlocked)
+	a.router.GET("/ip/:ip", a.getIP)
+
+	go endless.ListenAndServe(a.config.APIAddress, a.router)
 }
 
 func (a *API) getBlocked(c *gin.Context) {

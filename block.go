@@ -66,7 +66,7 @@ func (b *Block) BlockIP(ipd *IPDetails) error {
 		return nil
 	}
 
-	log.Infof("blocking %s  - %s (%s)", ipd.IP, ipd.Hostname, ipd.BlockReason)
+	log.Tracef("blocking %s  - %s (%s)", ipd.IP, ipd.Hostname, ipd.BlockReason)
 
 	ipd.IsBlocked = true
 
@@ -90,7 +90,7 @@ func (b *Block) BlockIP(ipd *IPDetails) error {
 
 // RemoveIP removes an IP from the blocklist
 func (b *Block) RemoveIP(ip net.IP) error {
-	log.Infof("removing %s from the blocklist", ip)
+	log.Tracef("removing %s from the blocklist", ip)
 	return b.resources.Store.Remove(b.ipNamespace(), ip)
 }
 
@@ -143,7 +143,7 @@ func (b *Block) BlockNetwork(network net.IPNet) error {
 		return nil
 	}
 
-	log.Infof("blocking network %s", network)
+	log.Tracef("blocking network %s", network)
 	b.cacheBlockedNetwork(network)
 
 	data, err := b.resources.Store.Get(b.cidrNamespace(), []byte(network.String()))
@@ -166,7 +166,7 @@ func (b *Block) BlockNetwork(network net.IPNet) error {
 
 // RemoveNetwork removes a network from the blocklist
 func (b *Block) RemoveNetwork(network net.IPNet) error {
-	log.Infof("removing network %s from the blocklist", network)
+	log.Tracef("removing network %s from the blocklist", network)
 	return b.resources.Store.Remove(b.cidrNamespace(), []byte(network.String()))
 }
 

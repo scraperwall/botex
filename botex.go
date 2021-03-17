@@ -198,13 +198,6 @@ func New(ctx context.Context, config *config.Config) (*Botex, error) {
 	b.history = NewHistory(ctx, b.resources, config)
 	log.Info("history created")
 
-	// Networks
-	//
-	if config.WithNetworks {
-		b.Use(plugins.NewNetworks(ctx, config))
-		log.Infof("networks enabled")
-	}
-
 	// API
 	//
 	b.api, err = NewAPI(ctx, config, b)
@@ -212,6 +205,17 @@ func New(ctx context.Context, config *config.Config) (*Botex, error) {
 		return nil, err
 	}
 	log.Info("API running")
+
+	// Networks
+	//
+	if config.WithNetworks {
+		networksPlugin := plugins.NewNetworks(ctx, config)
+		b.Use(networksPlugin)
+
+		networksPlugin.APIHooks(b.api.router)
+
+		log.Infof("networks enabled")
+	}
 
 	if config.LogMemoryStats {
 		go b.logMemoryStats(ctx)
