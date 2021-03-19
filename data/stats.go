@@ -12,6 +12,7 @@ type Stats struct {
 	App   int
 	Other int
 	Ratio float64
+	ASN   *asndb.ASN
 }
 
 type IPStats struct {
@@ -25,9 +26,4 @@ type NetworkStats struct {
 	Network      net.IPNet
 	NetworkSize  uint64
 	NetworkRatio float64
-}
-
-type ASNStats struct {
-	Stats
-	ASN *asndb.ASN
 }

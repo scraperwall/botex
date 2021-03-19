@@ -19,28 +19,30 @@ const blockNamespace = "bl"
 
 // Block is used to add IPs to the blocklist and to check whether an IP is blocked
 type Block struct {
-	networkCache      map[string]bool
-	networkCacheMutex sync.RWMutex
-	asnCache          map[int]bool
-	asnCacheMutex     sync.RWMutex
-	resources         *Resources
-	blockTTL          time.Duration
-	recheckChan       chan bool
-	ctx               context.Context
+	networkCache           map[string]bool
+	networkCacheMutex      sync.RWMutex
+	asnCache               map[int]bool
+	asnCacheMutex          sync.RWMutex
+	resources              *Resources
+	blockTTL               time.Duration
+	unblockWhitelistedChan chan bool
+	blockASNNetworkChan    chan bool
+	ctx                    context.Context
 }
 
 // NewBlock creates a new Blocklist.
 // The parent context and application configuration are passed on to the new instance
-func NewBlock(ctx context.Context, recheckChan chan bool, resources *Resources, blockTTL time.Duration) *Block {
+func NewBlock(ctx context.Context, wlChan, blChan chan bool, resources *Resources, blockTTL time.Duration) *Block {
 	b := Block{
-		networkCache:      make(map[string]bool),
-		networkCacheMutex: sync.RWMutex{},
-		asnCache:          make(map[int]bool),
-		asnCacheMutex:     sync.RWMutex{},
-		resources:         resources,
-		blockTTL:          blockTTL,
-		recheckChan:       recheckChan,
-		ctx:               ctx,
+		networkCache:           make(map[string]bool),
+		networkCacheMutex:      sync.RWMutex{},
+		asnCache:               make(map[int]bool),
+		asnCacheMutex:          sync.RWMutex{},
+		resources:              resources,
+		blockTTL:               blockTTL,
+		unblockWhitelistedChan: wlChan,
+		blockASNNetworkChan:    blChan,
+		ctx:                    ctx,
 	}
 
 	b.buildCache()
@@ -63,8 +65,6 @@ func (b *Block) BlockIP(msg data.IPBlockMessage) error {
 		return errors.New("IP is nil")
 	}
 
-	log.Tracef("blocking %s  - %s (%s)", msg.IP, msg.Hostname, msg.Reason)
-
 	data, err := b.resources.Store.Get(b.IPNamespace(msg.IP))
 	if err != nil && err != b.resources.Store.ErrNotFound() {
 		return err
@@ -74,6 +74,8 @@ func (b *Block) BlockIP(msg data.IPBlockMessage) error {
 	if len(data) > 0 {
 		return nil
 	}
+
+	log.Tracef("blocking %s  - %s (%s)", msg.IP, msg.Hostname, msg.Reason)
 
 	// write the IP to the kvstore
 	data, err = json.Marshal(msg)
@@ -150,7 +152,7 @@ func (b *Block) BlockNetwork(msg data.NetworkBlockMessage) error {
 		return errors.New("network is nil")
 	}
 
-	if b.isNetworkBlocked(msg.Network) {
+	if b.IsBlockedByASN(msg.ASN) {
 		return nil
 	}
 
@@ -172,7 +174,9 @@ func (b *Block) BlockNetwork(msg data.NetworkBlockMessage) error {
 	if err != nil {
 		return err
 	}
-	return b.resources.Store.SetEx(b.CIDRNamespace(msg.Network.String()), data, b.blockTTL)
+
+	err = b.resources.Store.SetEx(b.CIDRNamespace(msg.Network.String()), data, b.blockTTL)
+	return err
 }
 
 // RemoveNetwork removes a network from the blocklist
@@ -242,7 +246,7 @@ func (b *Block) BlockASN(msg data.BlockMessage) error {
 		return errors.New("asn is nil")
 	}
 
-	if b.isASNBlocked(msg.ASN.ASN) {
+	if b.IsBlockedByASN(msg.ASN) {
 		return nil
 	}
 
@@ -264,7 +268,14 @@ func (b *Block) BlockASN(msg data.BlockMessage) error {
 	if err != nil {
 		return err
 	}
-	return b.resources.Store.SetEx(b.ASNNamespace(msg.ASN.ASN), data, b.blockTTL)
+
+	err = b.resources.Store.SetEx(b.ASNNamespace(msg.ASN.ASN), data, b.blockTTL)
+	if err != nil {
+		return err
+	}
+	// b.blockASNNetworkChan <- true
+
+	return nil
 }
 
 // RemoveNetwork removes a network from the blocklist
@@ -321,6 +332,30 @@ func (b *Block) BlockedASNs() []data.BlockMessage {
 	return res
 }
 
+func (b *Block) IsBlockedByASN(asn *asndb.ASN) bool {
+	if _, err := b.GetASN(asn); err == nil {
+		return true
+	}
+
+	if _, err := b.GetNetwork(*asn.Network); err == nil {
+		return true
+	}
+
+	return false
+}
+
+func (b *Block) IsBlocked(ip net.IP, asn *asndb.ASN) bool {
+	if _, err := b.GetIP(ip); err == nil {
+		return true
+	}
+
+	if b.IsBlockedByASN(asn) {
+		return true
+	}
+
+	return false
+}
+
 // Clear removes all currently blocked items from the store
 func (b *Block) Clear() {
 	b.resources.Store.Remove([]byte(blockNamespace))
@@ -344,7 +379,7 @@ func (b *Block) cleanup() {
 			return
 		case <-ticker.C:
 			b.buildCache()
-		case <-b.recheckChan:
+		case <-b.unblockWhitelistedChan:
 			var ipd IPDetails
 			b.resources.Store.Each(b.IPNamespace([]byte{}), func(v []byte) {
 				err := json.Unmarshal(v, &ipd)
@@ -358,6 +393,10 @@ func (b *Block) cleanup() {
 			})
 		}
 	}
+}
+
+func (b *Block) CheckBlocked() {
+	b.blockASNNetworkChan <- true
 }
 
 func (b *Block) IPNamespace(ip []byte) []byte {
@@ -375,27 +414,11 @@ func (b *Block) CIDRNamespace(cidr string) []byte {
 	return []byte(fmt.Sprintf("%s:%s:%s", blockNamespace, "cidr", cidr))
 }
 
-func (b *Block) isNetworkBlocked(network *net.IPNet) bool {
-	b.networkCacheMutex.RLock()
-	defer b.networkCacheMutex.RUnlock()
-
-	_, blocked := b.networkCache[network.String()]
-	return blocked
-}
-
 func (b *Block) cacheBlockedNetwork(network *net.IPNet) {
 	b.networkCacheMutex.Lock()
 	defer b.networkCacheMutex.Unlock()
 
 	b.networkCache[network.String()] = true
-}
-
-func (b *Block) isASNBlocked(asn int) bool {
-	b.asnCacheMutex.RLock()
-	defer b.asnCacheMutex.RUnlock()
-
-	_, blocked := b.asnCache[asn]
-	return blocked
 }
 
 func (b *Block) cacheBlockedASN(asn *asndb.ASN) {

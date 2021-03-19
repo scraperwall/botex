@@ -30,6 +30,7 @@ type IPDetails struct {
 	CreatedAt       time.Time    `json:"createdat"`
 	UpdatedAt       time.Time    `json:"updatedat"`
 	LastBlockAt     time.Time    `json:"lastblockat"`
+	ForceBlock      bool         `json:"-"`
 }
 
 // IPData contains IPDetails and the most recent HTTP requests.
@@ -38,6 +39,7 @@ type IPData struct {
 	IPDetails
 	Requests     *Requests
 	ipUpdateChan chan data.IPStats
+	plugins      []Plugin
 
 	resources *Resources
 	config    *config.Config
@@ -46,7 +48,7 @@ type IPData struct {
 
 // NewIPData creates a new IPData item fro a given IP.
 // the parent context and app configuration are passed on from the parent
-func NewIPData(updateChan chan data.IPStats, ip net.IP, resources *Resources, config *config.Config) *IPData {
+func NewIPData(updateChan chan data.IPStats, ip net.IP, plugins []Plugin, resources *Resources, config *config.Config) *IPData {
 	asn := resources.ASNDB.Lookup(ip)
 	geo, _ := resources.GEOIPDB.Lookup(ip)
 
@@ -66,6 +68,7 @@ func NewIPData(updateChan chan data.IPStats, ip net.IP, resources *Resources, co
 		resources:    resources,
 		config:       config,
 		ipUpdateChan: updateChan,
+		plugins:      plugins,
 		mutex:        sync.RWMutex{},
 		Requests:     NewRequests(ip, updateChan, config),
 	}
@@ -80,18 +83,18 @@ func (ipd *IPData) Add(r *data.Request) {
 }
 
 // Update sets the cached statistics numbers using an IPStats item
-func (ipd *IPData) Update(stats data.IPStats) {
+func (ipd *IPData) Update(stats data.IPStats, force bool) {
 	ipd.Total = stats.Total
 	ipd.App = stats.App
 	ipd.Other = stats.Other
 	ipd.Ratio = stats.Ratio
 
-	if ipd.ShouldBeBlocked() {
-		now := time.Now()
-		if ipd.LastBlockAt.Add(ipd.config.BlockTTL).Before(now) {
-			ipd.LastBlockAt = now
-			ipd.resources.BlockChan <- &ipd.IPDetails
+	if now := time.Now(); ipd.ShouldBeBlocked() && (force || ipd.LastBlockAt.Add(ipd.config.BlockTTL).Before(now)) {
+		if force {
+			ipd.ForceBlock = true
 		}
+		ipd.LastBlockAt = now
+		ipd.resources.BlockChan <- &ipd.IPDetails
 	}
 }
 
@@ -103,19 +106,15 @@ func (ipd *IPData) SetHostname(hostname string) {
 	}
 	ipd.Hostname = hostname
 	ipd.ipUpdateChan <- data.IPStats{
-		IP: ipd.IP,
 		Stats: data.Stats{
-			Total: ipd.Total,
-			App:   ipd.App,
-			Other: ipd.Other,
-			Ratio: ipd.Ratio,
+			ASN: ipd.ASN,
 		},
+		IP: ipd.IP,
 	}
 }
 
 // ShouldBeBlocked deterines whether the IP represented by this item should be blocked
 func (ipd *IPData) ShouldBeBlocked() bool {
-	log.Tracef("%s (%s) total: %d/%d/%d, ratio: %.2f/%.2f", ipd.IP, ipd.Hostname, ipd.Total, ipd.config.MinAppRequests, ipd.config.MaxAppRequests, ipd.Ratio, ipd.config.MaxRatio)
 
 	decision := false
 
@@ -137,23 +136,32 @@ func (ipd *IPData) ShouldBeBlocked() bool {
 		return false
 	}
 
-	if ipd.Total > ipd.config.MaxAppRequests {
-		ipd.BlockReason = fmt.Sprintf("too many requests (%d/%d)", ipd.Total, ipd.config.MaxAppRequests)
+	if ipd.App > ipd.config.MaxAppRequests {
+		ipd.BlockReason = fmt.Sprintf("too many requests (%d/%d)", ipd.App, ipd.config.MaxAppRequests)
 		decision = true
 		goto RESOLVE
 	}
 
-	if ipd.Total > ipd.config.MinAppRequests &&
+	if ipd.App > ipd.config.MinAppRequests &&
 		ipd.config.MaxRatio <= ipd.Ratio {
-		ipd.BlockReason = fmt.Sprintf("too many requests (%d/%d) and app/asset ratio too high (%.2f/%0.2f)", ipd.Total, ipd.config.MinAppRequests, ipd.Ratio, ipd.config.MaxRatio)
+		ipd.BlockReason = fmt.Sprintf("too many requests (%d/%d) and app/asset ratio too high (%.2f/%0.2f)", ipd.App, ipd.config.MinAppRequests, ipd.Ratio, ipd.config.MaxRatio)
 		decision = true
 		goto RESOLVE
+	}
+
+	for _, plugin := range ipd.plugins {
+		if plugin.ShouldBeBlocked(ipd.IPStats()) {
+			decision = true
+			// log.Infof("blocked by network: %s", ipd.IP)
+			ipd.BlockReason = "blocked by ASN/network"
+			goto RESOLVE
+		}
 	}
 
 RESOLVE:
 	if decision == true && ipd.Hostname == "" {
 		ipd.Hostname = "resolving"
-		ipd.resources.Resolver.Enqueue(NewIPResolv(ipd.IP))
+		ipd.resources.Resolver.Resolve(NewIPResolv(ipd.IP))
 		return false
 	}
 
@@ -163,4 +171,26 @@ RESOLVE:
 // Expire removes all expired requests
 func (ipd *IPData) Expire() int {
 	return ipd.Requests.Expire()
+}
+
+func (ipd *IPData) Stats() data.Stats {
+	return data.Stats{
+		ASN:   ipd.ASN,
+		Total: ipd.Total,
+		App:   ipd.App,
+		Other: ipd.Other,
+		Ratio: ipd.Ratio,
+	}
+}
+
+func (ipd *IPData) IPStats() data.IPStats {
+	withHostname := 0
+	if ipd.Hostname != "" && ipd.Hostname != "resolving" {
+		withHostname = 1
+	}
+	return data.IPStats{
+		Stats:        ipd.Stats(),
+		IP:           ipd.IP,
+		WithHostname: withHostname,
+	}
 }

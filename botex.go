@@ -75,7 +75,8 @@ func (na *natsAuth) Check(c natsd.ClientAuthentication) bool {
 func New(ctx context.Context, config *config.Config) (*Botex, error) {
 	var err error
 
-	blockRecheckChan := make(chan bool, 10)
+	blockRecheckChan := make(chan bool, 100)
+	blockASNNetChan := make(chan bool, 100)
 	resources := NewResources()
 
 	// Badger
@@ -177,15 +178,9 @@ func New(ctx context.Context, config *config.Config) (*Botex, error) {
 	b := &Botex{
 		config:            config,
 		resources:         resources,
-		blocked:           NewBlock(ctx, blockRecheckChan, resources, config.BlockTTL),
 		natsSubscriptions: make([]*nats.Subscription, 0),
 		plugins:           make([]Plugin, 0),
 		ctx:               ctx,
-	}
-
-	// clear blocked items
-	if config.ClearBlocked {
-		b.blocked.Clear()
 	}
 
 	// NATS subscriptions
@@ -199,10 +194,12 @@ func New(ctx context.Context, config *config.Config) (*Botex, error) {
 	b.natsSubscriptions = append(b.natsSubscriptions, reqSubscription)
 	log.Info("nats subscriptions done")
 
-	// History
-	//
-	b.history = NewHistory(ctx, b.resources, config)
-	log.Info("history created")
+	// Block
+	b.blocked = NewBlock(ctx, blockRecheckChan, blockASNNetChan, resources, config.BlockTTL)
+	// clear blocked items
+	if config.ClearBlocked {
+		b.blocked.Clear()
+	}
 
 	// API
 	//
@@ -221,6 +218,11 @@ func New(ctx context.Context, config *config.Config) (*Botex, error) {
 		log.Infof("networks enabled")
 	}
 
+	// History
+	//
+	b.history = NewHistory(ctx, b.plugins, b.resources, config)
+	log.Info("history created")
+
 	if config.LogMemoryStats {
 		go b.logMemoryStats(ctx)
 	}
@@ -228,6 +230,7 @@ func New(ctx context.Context, config *config.Config) (*Botex, error) {
 	go b.resolvWorker(resolvChan)
 	go b.blockWorker()
 	go b.statsLogWorker()
+	go b.blockASNNetWorker(blockASNNetChan)
 
 	// clean up when we're done
 	go func() {
@@ -284,13 +287,45 @@ func (b *Botex) logMemoryStats(ctx context.Context) {
 	}
 }
 
+func (b *Botex) blockASNNetWorker(blockChan chan bool) {
+	for {
+		select {
+		case <-b.ctx.Done():
+			close(blockChan)
+			return
+		case <-blockChan:
+			toBlock := make([]data.IPStats, 0)
+			b.history.Each(func(ip string, ipd *IPData) {
+				if !ipd.ForceBlock && (ipd.IsBlocked || !b.blocked.IsBlockedByASN(ipd.ASN)) {
+					return
+				}
+
+				// log.Infof("netblock %s - %d (%s)", ipd.IP, ipd.ASN.ASN, ipd.ASN.Organization)
+
+				toBlock = append(toBlock, data.IPStats{
+					IP: ipd.IP,
+					Stats: data.Stats{
+						ASN:   ipd.ASN,
+						Total: ipd.Total,
+						App:   ipd.App,
+						Other: ipd.Other,
+						Ratio: ipd.Ratio,
+					},
+				})
+			})
+
+			b.history.update(true, toBlock...)
+		}
+	}
+}
+
 func (b *Botex) blockWorker() {
 	for {
 		select {
 		case <-b.ctx.Done():
 			return
 		case block := <-b.resources.BlockChan:
-			if block.IsBlocked {
+			if block.IsBlocked && !block.ForceBlock {
 				continue
 			}
 			msg := data.IPBlockMessage{
@@ -301,6 +336,7 @@ func (b *Botex) blockWorker() {
 					Reason:    block.BlockReason,
 					BlockedAt: time.Now(),
 					Stats: data.Stats{
+						ASN:   block.ASN,
 						Total: block.Total,
 						App:   block.App,
 						Other: block.Other,

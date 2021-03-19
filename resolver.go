@@ -155,7 +155,7 @@ func (r *Resolver) reverseLookup(rip *IPResolv) {
 		// a DNS lookup error occured: try again
 		if err2 != nil {
 			rip.Err = err.Error()
-			r.Enqueue(rip)
+			r.Resolve(rip)
 			return
 		}
 
@@ -172,7 +172,7 @@ func (r *Resolver) reverseLookup(rip *IPResolv) {
 		// an error occured while retrieving the hostname from the cache: try again
 		log.Tracef("serious badger lookup error: %s", err)
 		// rip.Err = err.Error()
-		r.Enqueue(rip)
+		r.Resolve(rip)
 		return
 	}
 }
@@ -220,8 +220,8 @@ func (r *Resolver) reverseDNSLookup(ip net.IP) (string, error) {
 	return hostname, nil
 }
 
-// Enqueue queues a ReverseResolvable to be resolved
-func (r *Resolver) Enqueue(rip *IPResolv) {
+// Resolve queues a ReverseResolvable to be resolved
+func (r *Resolver) Resolve(rip *IPResolv) {
 	rip.Tries++
 	rip.Err = ""
 

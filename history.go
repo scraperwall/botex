@@ -16,6 +16,7 @@ type History struct {
 	config       *config.Config
 	resources    *Resources
 	data         map[string]*IPData
+	plugins      []Plugin
 	mutex        sync.RWMutex
 	windowSize   time.Duration
 	numWindows   int
@@ -23,11 +24,12 @@ type History struct {
 }
 
 // NewHistory creates a new History item and passes on the context and configuration from its parent
-func NewHistory(ctx context.Context, resources *Resources, config *config.Config) *History {
+func NewHistory(ctx context.Context, plugins []Plugin, resources *Resources, config *config.Config) *History {
 	h := History{
 		config:       config,
 		resources:    resources,
 		data:         make(map[string]*IPData),
+		plugins:      plugins,
 		windowSize:   config.WindowSize,
 		numWindows:   config.NumWindows,
 		ipUpdateChan: make(chan data.IPStats),
@@ -47,7 +49,7 @@ func NewHistory(ctx context.Context, resources *Resources, config *config.Config
 				h.expire()
 			case stats := <-h.ipUpdateChan:
 				// log.Infof("received IPStats for %s - total: %d, app: %d, other: %d, ratio: %.2f", stats.IP, stats.Total, stats.App, stats.Other, stats.Ratio)
-				h.update(stats)
+				h.update(false, stats)
 			}
 		}
 	}()
@@ -68,19 +70,32 @@ func (h *History) expire() {
 }
 
 // update updates the cached stats for an IP
-func (h *History) update(stats data.IPStats) {
-	log.Tracef("History update before Lock()")
+func (h *History) update(force bool, stats ...data.IPStats) {
+	for _, s := range stats {
+		ipstr := s.IP.String()
+		h.mutex.RLock()
+		ipd, ok := h.data[ipstr]
+		h.mutex.RUnlock()
 
-	log.Tracef("History update before ipd.Update")
-	ipstr := stats.IP.String()
+		if !ok {
+			log.Warnf("%s, %d (%s) is not in history", ipstr, s.ASN.ASN, s.ASN.Organization)
+			return
+		}
+
+		if s.Total <= 0 {
+			log.Warnf("%s - %d %s has no data", ipstr, s.ASN.ASN, s.ASN.Organization)
+			return
+		}
+		ipd.Update(s, force)
+	}
+}
+
+func (h *History) Each(callback func(key string, ipd *IPData)) {
 	h.mutex.RLock()
-	ipd, ok := h.data[ipstr]
-	h.mutex.RUnlock()
+	defer h.mutex.RUnlock()
 
-	if ok {
-		log.Tracef("History trying to update %s", ipd.IP)
-		ipd.Update(stats)
-		log.Tracef("History succeeded to update %s", ipd.IP)
+	for k, i := range h.data {
+		callback(k, i)
 	}
 }
 
@@ -94,7 +109,7 @@ func (h *History) Add(r *data.Request) bool {
 
 	h.mutex.Lock()
 	if _, ok := h.data[ipstr]; !ok {
-		h.data[ipstr] = NewIPData(h.ipUpdateChan, ip, h.resources, h.config)
+		h.data[ipstr] = NewIPData(h.ipUpdateChan, ip, h.plugins, h.resources, h.config)
 		newIP = true
 	}
 	h.mutex.Unlock()
@@ -117,14 +132,11 @@ func (h *History) Add(r *data.Request) bool {
 func (h *History) SetHostname(ip net.IP, hostname string) {
 	log.Tracef("SetHostname %s %s", ip, hostname)
 	h.mutex.RLock()
-	log.Tracef("SetHostname lock acquired")
 	ipd, ok := h.data[ip.String()]
 	h.mutex.RUnlock()
 
 	if ok {
-		log.Tracef("SetHostname before ipd.SetHostname")
 		ipd.SetHostname(hostname)
-		log.Tracef("SetHostname after ipd.SetHostname")
 	} else {
 		log.Warnf("history ipdata for %s (%s) is nil", ip, hostname)
 	}

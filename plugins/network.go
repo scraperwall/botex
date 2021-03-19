@@ -22,9 +22,9 @@ import (
 // Networks contains requests statistics for all networks
 type Networks struct {
 	data       map[string]*NetworkData
-	asnData    map[int]*data.ASNStats
+	asnData    map[int]*data.Stats
 	asnAverage int
-	netData    map[string]*data.ASNStats
+	netData    map[string]*data.Stats
 	netAverage int
 	mutex      sync.RWMutex
 	blocker    data.Blocker
@@ -321,6 +321,16 @@ func (n *Networks) Get(ipn *net.IPNet) (nd *NetworkData, found bool) {
 	return nd, found
 }
 
+// ShouldBeBlocked decides whether an IP should be blocked based on its network and/or ASN being blocked
+func (n *Networks) ShouldBeBlocked(stats data.IPStats) bool {
+	// log.Infof("network checking asn/network block for %d %s", stats.ASN.ASN, stats.ASN.Organization)
+	if n.blocker.IsBlockedByASN(stats.ASN) {
+		// log.Infof("%s blocked by asn", stats.IP)
+		return true
+	}
+	return false
+}
+
 // Averages returns the average of requests across all networks
 func (n *Networks) Averages() data.NetworkStats {
 	n.mutex.RLock()
@@ -375,8 +385,8 @@ func (n *Networks) SetBlocker(b data.Blocker) {
 
 func (n *Networks) update() {
 
-	asns := make(map[int]*data.ASNStats)
-	nets := make(map[string]*data.ASNStats)
+	asns := make(map[int]*data.Stats)
+	nets := make(map[string]*data.Stats)
 	var total int
 
 	requestLimit := n.config.MaxAppRequests
@@ -392,7 +402,7 @@ func (n *Networks) update() {
 
 		stats, exists := asns[nd.ASN.ASN]
 		if !exists {
-			asns[nd.ASN.ASN] = &data.ASNStats{
+			asns[nd.ASN.ASN] = &data.Stats{
 				ASN: nd.ASN,
 			}
 			stats = asns[nd.ASN.ASN]
@@ -406,7 +416,7 @@ func (n *Networks) update() {
 
 		stats, exists = nets[nd.ASN.Cidr]
 		if !exists {
-			nets[nd.ASN.Cidr] = &data.ASNStats{
+			nets[nd.ASN.Cidr] = &data.Stats{
 				ASN: nd.ASN,
 			}
 			stats = nets[nd.ASN.Cidr]
@@ -420,11 +430,13 @@ func (n *Networks) update() {
 	}
 	n.mutex.RUnlock()
 
+	numBlocked := 0
+
 	for asn, stats := range asns {
 		c := asnCounts[asn]
 		if stats.Total > requestLimit && stats.Ratio/float64(c) > n.config.MaxRatio {
-
-			go n.blocker.BlockASN(data.BlockMessage{
+			numBlocked++
+			n.blocker.BlockASN(data.BlockMessage{
 				ASN:       stats.ASN,
 				BlockedAt: time.Now(),
 				Reason:    fmt.Sprintf("asn has too many requests (%d/%d) and ratio is too high (%.2f/%.2f)", stats.Total/c, requestLimit, stats.Ratio/float64(c), n.config.MaxRatio),
@@ -442,7 +454,8 @@ func (n *Networks) update() {
 		c := netCounts[network]
 
 		if stats.Total > requestLimit && stats.Ratio/float64(c) > n.config.MaxRatio {
-			go n.blocker.BlockNetwork(data.NetworkBlockMessage{
+			numBlocked++
+			n.blocker.BlockNetwork(data.NetworkBlockMessage{
 				Network: stats.ASN.Network,
 				BlockMessage: data.BlockMessage{
 					ASN:       stats.ASN,
@@ -457,6 +470,11 @@ func (n *Networks) update() {
 				},
 			})
 		}
+	}
+
+	if numBlocked > 0 {
+		log.Trace("updating blocks due to new ASN/Network block")
+		n.blocker.CheckBlocked()
 	}
 
 	n.mutex.Lock()

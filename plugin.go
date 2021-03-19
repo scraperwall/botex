@@ -9,4 +9,5 @@ type Plugin interface {
 	HandleRequest(r *data.Request) (cont bool)
 	APIHooks(r *gin.Engine)
 	SetBlocker(b data.Blocker)
+	ShouldBeBlocked(stats data.IPStats) (block bool)
 }

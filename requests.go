@@ -159,6 +159,7 @@ func (r *Requests) Add(req *data.Request) {
 	stats := data.IPStats{
 		IP: r.IP,
 		Stats: data.Stats{
+			ASN:   req.ASN,
 			Total: int(total),
 			App:   int(app),
 			Other: int(other),
