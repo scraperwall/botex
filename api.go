@@ -51,15 +51,22 @@ func (a *API) run() {
 }
 
 func (a *API) getBlockedIPs(c *gin.Context) {
+
 	blocked := make([]data.IPBlockMessage, 0)
 
 	err := a.botex.resources.Store.Each(a.botex.blocked.IPNamespace([]byte{}), func(v []byte) {
-		var ipd data.IPBlockMessage
-		err := json.Unmarshal(v, &ipd)
-		blocked = append(blocked, ipd)
+		var msg data.IPBlockMessage
+		err := json.Unmarshal(v, &msg)
 		if err != nil {
 			log.Warn(err)
 		}
+		if ipd := a.botex.history.IPData(msg.IP); ipd != nil {
+			msg.Total = ipd.Total
+			msg.App = ipd.App
+			msg.Other = ipd.Other
+			msg.Ratio = ipd.Ratio
+		}
+		blocked = append(blocked, msg)
 	})
 	if err != nil {
 		c.AbortWithStatusJSON(http.StatusInternalServerError, gin.H{"error": "failed to load all blocked IPs"})

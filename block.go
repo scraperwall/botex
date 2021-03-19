@@ -250,7 +250,7 @@ func (b *Block) BlockASN(msg data.BlockMessage) error {
 		return nil
 	}
 
-	log.Infof("blocking asn %d (%s): total: %d, app: %d, ratio: %.2f", msg.ASN.ASN, msg.ASN.Organization, msg.Total, msg.App, msg.Ratio)
+	log.Tracef("blocking asn %d (%s): total: %d, app: %d, ratio: %.2f", msg.ASN.ASN, msg.ASN.Organization, msg.Total, msg.App, msg.Ratio)
 	b.cacheBlockedASN(msg.ASN)
 
 	data, err := b.resources.Store.Get(b.ASNNamespace(msg.ASN.ASN))
@@ -280,7 +280,7 @@ func (b *Block) BlockASN(msg data.BlockMessage) error {
 
 // RemoveNetwork removes a network from the blocklist
 func (b *Block) RemoveASN(asn *asndb.ASN) error {
-	log.Infof("removing asn %d (%s) from the blocklist", asn.ASN, asn.Organization)
+	log.Tracef("removing asn %d (%s) from the blocklist", asn.ASN, asn.Organization)
 	return b.resources.Store.Remove(b.ASNNamespace(asn.ASN))
 }
 
@@ -364,7 +364,7 @@ func (b *Block) Clear() {
 		log.Warn(err)
 		return
 	}
-	log.Infof("blocked items cleared: %d items in the database", c)
+	log.Tracef("blocked items cleared: %d items in the database", c)
 }
 
 // cleanup unblocks every IP that has been whitelisted since it was written to the blocklist

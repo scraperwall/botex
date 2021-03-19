@@ -77,15 +77,10 @@ func (h *History) update(force bool, stats ...data.IPStats) {
 		ipd, ok := h.data[ipstr]
 		h.mutex.RUnlock()
 
-		if !ok {
-			log.Warnf("%s, %d (%s) is not in history", ipstr, s.ASN.ASN, s.ASN.Organization)
+		if !ok || s.Total <= 0 {
 			return
 		}
 
-		if s.Total <= 0 {
-			log.Warnf("%s - %d %s has no data", ipstr, s.ASN.ASN, s.ASN.Organization)
-			return
-		}
 		ipd.Update(s, force)
 	}
 }

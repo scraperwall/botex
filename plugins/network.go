@@ -378,6 +378,12 @@ func (n *Networks) APIHooks(r *gin.Engine) {
 	r.GET("/blocked/asns", n.apiGetBlockedASNs)
 }
 
+// IsWhitelisted determines whether an IP is whitelisted
+// This plugin doesn't whitelist and always returns false
+func (n *Networks) IsWhitelisted(ip net.IP) bool {
+	return false
+}
+
 // SetBlocker sets the instance through which it can block networks
 func (n *Networks) SetBlocker(b data.Blocker) {
 	n.blocker = b
