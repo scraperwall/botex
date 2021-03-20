@@ -8,7 +8,7 @@ import (
 )
 
 type Plugin interface {
-	HandleRequest(r *data.Request) (cont bool)
+	HandleRequest(r *data.Request)
 	APIHooks(r *gin.Engine)
 	SetBlocker(b data.Blocker)
 	ShouldBeBlocked(stats data.IPStats) (block bool)

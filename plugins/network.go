@@ -136,9 +136,10 @@ func (nd *NetworkData) HandleRequest(r *data.Request) {
 	defer nd.mutex.Unlock()
 
 	if nd.expireTimer != nil {
-		nd.expireTimer.Reset(nd.windowSize * time.Duration(nd.numWindows))
+
+		nd.expireTimer.Reset(r.Time.Sub(time.Now()) + nd.windowSize*time.Duration(nd.numWindows))
 	} else {
-		nd.expireTimer = time.NewTimer(nd.windowSize * time.Duration(nd.numWindows))
+		nd.expireTimer = time.NewTimer(r.Time.Sub(time.Now()) + nd.windowSize*time.Duration(nd.numWindows))
 	}
 }
 
@@ -251,7 +252,7 @@ func NewNetworks(ctx context.Context, config *config.Config) *Networks {
 			case network := <-n.removeChan:
 				n.Remove(network)
 			case <-ticker.C:
-				n.update()
+				n.updateAndBlock()
 				n.logStats()
 			}
 		}
@@ -269,9 +270,7 @@ func (n *Networks) Remove(network *net.IPNet) {
 }
 
 // HandleRequest handles a request and saves it into the network data
-func (n *Networks) HandleRequest(r *data.Request) (cont bool) {
-	cont = true
-
+func (n *Networks) HandleRequest(r *data.Request) {
 	log.Tracef("networks adding %s - %s (%d)", r.Source, r.ASN.Network, len(n.data))
 
 	cidr := r.ASN.Network.String()
@@ -283,8 +282,6 @@ func (n *Networks) HandleRequest(r *data.Request) (cont bool) {
 
 	n.data[cidr].HandleRequest(r)
 	n.mutex.Unlock()
-
-	return true
 }
 
 // Count returns the number of networks
@@ -372,10 +369,10 @@ func (n *Networks) APIHooks(r *gin.Engine) {
 	if r == nil {
 		log.Fatal("gin router is nil")
 	}
-	r.GET("/networks", n.apiGetNetworks)
 	r.GET("/network/:ip/:bits", n.apiGetNetwork)
 	r.GET("/blocked/networks", n.apiGetBlockedNetworks)
 	r.GET("/blocked/asns", n.apiGetBlockedASNs)
+	r.GET("/networks", n.apiGetNetworks)
 }
 
 // IsWhitelisted determines whether an IP is whitelisted
@@ -389,7 +386,7 @@ func (n *Networks) SetBlocker(b data.Blocker) {
 	n.blocker = b
 }
 
-func (n *Networks) update() {
+func (n *Networks) updateAndBlock() {
 
 	asns := make(map[int]*data.Stats)
 	nets := make(map[string]*data.Stats)
