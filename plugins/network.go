@@ -440,10 +440,10 @@ func (n *Networks) updateAndBlock() {
 		if stats.Total > requestLimit && stats.Ratio/float64(c) > n.config.MaxRatio {
 			numBlocked++
 			n.blocker.BlockASN(data.BlockMessage{
-				ASN:       stats.ASN,
 				BlockedAt: time.Now(),
 				Reason:    fmt.Sprintf("asn has too many requests (%d/%d) and ratio is too high (%.2f/%.2f)", stats.Total/c, requestLimit, stats.Ratio/float64(c), n.config.MaxRatio),
 				Stats: data.Stats{
+					ASN:   stats.ASN,
 					Total: stats.Total,
 					App:   stats.App,
 					Other: stats.Other,
@@ -461,10 +461,10 @@ func (n *Networks) updateAndBlock() {
 			n.blocker.BlockNetwork(data.NetworkBlockMessage{
 				Network: stats.ASN.Network,
 				BlockMessage: data.BlockMessage{
-					ASN:       stats.ASN,
 					BlockedAt: time.Now(),
 					Reason:    fmt.Sprintf("network has too many requests (%d/%d) and ratio is too high (%.2f/%.2f)", stats.Total/c, requestLimit, stats.Ratio/float64(c), n.config.MaxRatio),
 					Stats: data.Stats{
+						ASN:   stats.ASN,
 						Total: stats.Total,
 						App:   stats.App,
 						Other: stats.Other,

@@ -8,22 +8,22 @@ import (
 
 // Stats contains aggregated statistics about a single IP
 type Stats struct {
-	Total int
-	App   int
-	Other int
-	Ratio float64
-	ASN   *asndb.ASN
+	Total int        `json:"total"`
+	App   int        `json:"app"`
+	Other int        `json:"other"`
+	Ratio float64    `json:"ratio"`
+	ASN   *asndb.ASN `json:"asn"`
 }
 
 type IPStats struct {
 	Stats
-	IP           net.IP
-	WithHostname int
+	IP           net.IP `json:"ip"`
+	WithHostname int    `json:"with_hostname"`
 }
 
 type NetworkStats struct {
 	Stats
-	Network      net.IPNet
-	NetworkSize  uint64
-	NetworkRatio float64
+	Network      net.IPNet `json:"network"`
+	NetworkSize  uint64    `json:"network_size"`
+	NetworkRatio float64   `json:"network_ratio"`
 }

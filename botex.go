@@ -332,7 +332,6 @@ func (b *Botex) blockWorker() {
 				IP:       block.IP,
 				Hostname: block.Hostname,
 				BlockMessage: data.BlockMessage{
-					ASN:       block.ASN,
 					City:      &block.GeoIP.City,
 					Reason:    block.BlockReason,
 					BlockedAt: time.Now(),

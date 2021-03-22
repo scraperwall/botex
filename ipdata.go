@@ -23,13 +23,13 @@ type IPDetails struct {
 	App             int          `json:"app"`
 	Other           int          `json:"other"`
 	Ratio           float64      `json:"ratio"`
-	IsBlocked       bool         `json:"isblocked"`
-	BlockReason     string       `json:"blockreason"`
+	IsBlocked       bool         `json:"is_blocked"`
+	BlockReason     string       `json:"block_reason"`
 	Whitelisted     bool         `json:"whitelisted"`
-	WhitelistReason string       `json:"whitelistreason"`
-	CreatedAt       time.Time    `json:"createdat"`
-	UpdatedAt       time.Time    `json:"updatedat"`
-	LastBlockAt     time.Time    `json:"lastblockat"`
+	WhitelistReason string       `json:"whitelist_reason"`
+	CreatedAt       time.Time    `json:"created_at"`
+	UpdatedAt       time.Time    `json:"updated_at"`
+	LastBlockAt     time.Time    `json:"lastblock_at"`
 	ForceBlock      bool         `json:"-"`
 }
 
@@ -37,7 +37,7 @@ type IPDetails struct {
 // It handles updating the aggregated stats when it receives new requests
 type IPData struct {
 	IPDetails
-	Requests     *Requests
+	Requests     *Requests `json:"requests"`
 	ipUpdateChan chan data.IPStats
 	plugins      []Plugin
 

@@ -4,25 +4,23 @@ import (
 	"net"
 	"time"
 
-	"github.com/scraperwall/asndb/v2"
 	"github.com/scraperwall/geoip/v2"
 )
 
 type BlockMessage struct {
 	Stats
-	Reason    string
-	ASN       *asndb.ASN
-	City      *geoip.City
-	BlockedAt time.Time
+	Reason    string      `json:"reason"`
+	City      *geoip.City `json:"city"`
+	BlockedAt time.Time   `json:"blocked_at"`
 }
 
 type IPBlockMessage struct {
 	BlockMessage
-	IP       net.IP
-	Hostname string
+	IP       net.IP `json:"ip"`
+	Hostname string `json:"hostname"`
 }
 
 type NetworkBlockMessage struct {
 	BlockMessage
-	Network *net.IPNet
+	Network *net.IPNet `json:"network"`
 }
