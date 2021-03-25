@@ -133,8 +133,10 @@ func (r *Requests) Add(req *data.Request) {
 	log.Tracef("allWindow add %s done", r.IP)
 
 	if assetRegexp.MatchString(req.URL) {
+		req.IsApp = false
 		r.otherWindow.Add(req.Time)
 	} else {
+		req.IsApp = true
 		r.appWindow.Add(req.Time)
 	}
 	log.Tracef("app/otherWindow add %s done", r.IP)
@@ -203,4 +205,16 @@ func (r *Requests) Useragents() map[string]int {
 	r.mutex.RUnlock()
 
 	return r.userAgents.TotalMap()
+}
+
+// TotalStats returns a map that has the timestamp (unix nanoseconds) as key
+// and the count of requests as value
+func (r *Requests) TotalStats() map[int]int64 {
+	return r.allWindow.Map()
+}
+
+// AppStats returns a map that has the timestamp (unix nanoseconds) as key
+// and the count of app requests as value
+func (r *Requests) AppStats() map[int]int64 {
+	return r.appWindow.Map()
 }

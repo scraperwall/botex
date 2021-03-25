@@ -62,7 +62,13 @@ func (h *History) expire() {
 	defer h.mutex.Unlock()
 
 	for ip, ipd := range h.data {
-		if ipd.Requests.CanBeExpired() && ipd.Expire() <= 0 {
+		if !ipd.Requests.CanBeExpired() {
+			continue
+		}
+
+		numExpired := ipd.Expire()
+
+		if numExpired <= 0 {
 			log.Tracef("IPData for %s is empty. Removing it.", ip)
 			delete(h.data, ip)
 		}

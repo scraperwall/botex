@@ -110,7 +110,7 @@ func (b *Botex) LogReplay(logfile, format string) {
 		// jsonc.Publish(natsRequestsSubject, request)
 	}
 
-	return
+	//return
 	time.Sleep(b.config.WindowSize)
 
 	for {

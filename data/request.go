@@ -15,6 +15,7 @@ type Request struct {
 	Method    string     `json:"method"`
 	Seq       int        `json:"seq"`
 	Timestamp int64      `json:"timestamp"`
-	Time      time.Time  `json:"-"`
+	Time      time.Time  `json:"time"`
 	ASN       *asndb.ASN `json:"asn"`
+	IsApp     bool       `json:"is_app"`
 }

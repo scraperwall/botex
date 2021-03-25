@@ -3,9 +3,12 @@ package botex
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net"
 	"net/http"
 	"sort"
+	"strconv"
+	"time"
 
 	"github.com/fvbock/endless"
 	"github.com/gin-contrib/cors"
@@ -46,11 +49,13 @@ func (a *API) run() {
 
 	a.router.GET("/blocked/ips", a.getBlockedIPs)
 	a.router.GET("/ip/:ip", a.getIP)
+	a.router.GET("/request-stats/:ip/:windows", a.getRequestStats)
 
 	go endless.ListenAndServe(a.config.APIAddress, a.router)
 }
 
 func (a *API) getBlockedIPs(c *gin.Context) {
+	sortBy := c.Query("sort")
 
 	blocked := make([]data.IPBlockMessage, 0)
 
@@ -73,9 +78,15 @@ func (a *API) getBlockedIPs(c *gin.Context) {
 		return
 	}
 
-	sort.Slice(blocked, func(a, b int) bool {
-		return blocked[a].Total > blocked[b].Total
-	})
+	if sortBy == "total" {
+		sort.Slice(blocked, func(a, b int) bool {
+			return blocked[a].Total > blocked[b].Total
+		})
+	} else {
+		sort.Slice(blocked, func(a, b int) bool {
+			return int(blocked[a].BlockedAt.UnixNano()) > int(blocked[b].BlockedAt.UnixNano())
+		})
+	}
 
 	c.JSON(http.StatusOK, blocked)
 }
@@ -89,9 +100,9 @@ func (a *API) getIP(c *gin.Context) {
 	}
 
 	var data struct {
-		IPDetails  *IPDetails
-		Requests   []*data.Request
-		Useragents map[string]int
+		IPDetails  *IPDetails      `json:"ip_details"`
+		Requests   []*data.Request `json:"requests"`
+		Useragents map[string]int  `json:"useragents"`
 	}
 
 	data.IPDetails = &ipdata.IPDetails
@@ -99,4 +110,75 @@ func (a *API) getIP(c *gin.Context) {
 	data.Useragents = ipdata.Requests.Useragents()
 
 	c.JSON(http.StatusOK, data)
+}
+
+func (a *API) getRequestStats(c *gin.Context) {
+	numWindows, err := strconv.Atoi(c.Param("windows"))
+	if err != nil {
+		c.AbortWithStatusJSON(http.StatusNotAcceptable, gin.H{"error": "windows must be a number"})
+		return
+	}
+
+	ip := net.ParseIP(c.Param("ip"))
+	ipdata := a.botex.history.IPData(ip)
+	if ipdata == nil {
+		c.AbortWithStatusJSON(http.StatusNotFound, gin.H{"error": fmt.Sprintf("IP %s not found", ip)})
+		return
+	}
+
+	statsType := "all"
+	if q := c.Query("type"); q != "" {
+		statsType = q
+	}
+
+	var reqStats map[int]int64
+	if statsType == "app" {
+		reqStats = ipdata.Requests.AppStats()
+	} else {
+		reqStats = ipdata.Requests.TotalStats()
+	}
+
+	var tsMin, tsMax int
+	for ts := range reqStats {
+		if tsMin == 0 || tsMin > ts {
+			tsMin = ts
+		}
+
+		if tsMax == 0 || tsMax < ts {
+			tsMax = ts
+		}
+	}
+
+	now := time.Now()
+	windowSize := time.Duration(tsMax-tsMin) / time.Duration(numWindows)
+
+	type RequestWindow struct {
+		Time  time.Time `json:"time"`
+		Count int64     `json:"count"`
+	}
+
+	stats := make([]RequestWindow, numWindows)
+
+	if windowSize <= 0 {
+		windowSize = time.Second
+	}
+	for i := 0; i < numWindows; i++ {
+		stats[numWindows-1-i] = RequestWindow{
+			Time:  now.Add(-1 * time.Duration(i) * windowSize).Truncate(windowSize),
+			Count: 0,
+		}
+	}
+
+	for ts, count := range reqStats {
+		reqTime := time.Unix(0, int64(ts))
+
+		idx := int(now.Sub(reqTime) / windowSize)
+		if idx >= numWindows {
+			idx = numWindows - 1
+		}
+
+		stats[idx].Count += count
+	}
+
+	c.JSON(http.StatusOK, stats)
 }

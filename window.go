@@ -92,3 +92,20 @@ func (w *Window) Expire() int {
 	log.Tracef("window expire done - len: %d", w.data.Size())
 	return w.data.Size()
 }
+
+func (w *Window) Map() map[int]int64 {
+	w.mutex.RLock()
+	defer w.mutex.RUnlock()
+
+	res := make(map[int]int64)
+
+	iter := w.data.Iterator()
+
+	for iter.Next() {
+		key := iter.Key().(int)
+		// log.Infof("%d = %d", key, iter.Value())
+		res[key] = iter.Value().(int64)
+	}
+
+	return res
+}

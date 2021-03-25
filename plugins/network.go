@@ -7,10 +7,13 @@ import (
 	"net"
 	"net/http"
 	"sort"
+	"strconv"
 	"sync"
 	"time"
 
+	"github.com/emirpasic/gods/maps/treebidimap"
 	"github.com/emirpasic/gods/maps/treemap"
+	"github.com/emirpasic/gods/utils"
 	"github.com/gin-gonic/gin"
 	"github.com/scraperwall/asndb/v2"
 	"github.com/scraperwall/botex/config"
@@ -18,6 +21,10 @@ import (
 	"github.com/scraperwall/botex/matchers"
 	log "github.com/sirupsen/logrus"
 )
+
+type NetworkStats struct {
+	data.Stats
+}
 
 // Networks contains requests statistics for all networks
 type Networks struct {
@@ -42,12 +49,14 @@ type NetworkData struct {
 	App       int        `json:"app"`
 	Other     int        `json:"other"`
 	Ratio     float64    `json:"ratio"`
+	IPCount   int        `json:"ipcount"`
 	UpdatedAt time.Time  `json:"updatedat"`
 	ASN       *asndb.ASN `json:"asn"`
 
 	totalMap *treemap.Map
 	appMap   *treemap.Map
 	otherMap *treemap.Map
+	ipMap    *treebidimap.Map
 
 	removeChan  chan *net.IPNet
 	mutex       sync.RWMutex
@@ -68,6 +77,7 @@ func NewNetworkData(ctx context.Context, ipnet *net.IPNet, removeChan chan *net.
 		totalMap:    treemap.NewWithIntComparator(),
 		appMap:      treemap.NewWithIntComparator(),
 		otherMap:    treemap.NewWithIntComparator(),
+		ipMap:       treebidimap.NewWith(utils.IntComparator, utils.StringComparator),
 		mutex:       sync.RWMutex{},
 		windowSize:  config.WindowSize,
 		numWindows:  config.NumWindows,
@@ -106,6 +116,8 @@ func (nd *NetworkData) HandleRequest(r *data.Request) {
 	key := nd.keyFor(r.Time)
 	var val int64
 
+	// update stats
+	//
 	stats := nd.appMap
 	if matchers.Assets.MatchString(r.URL) {
 		stats = nd.otherMap
@@ -132,11 +144,19 @@ func (nd *NetworkData) HandleRequest(r *data.Request) {
 	nd.updateStats()
 	nd.UpdatedAt = time.Now()
 
+	// update IPs: remove the IP in case it exists and insert it with the request's time
+	ipstr := net.ParseIP(r.Source).String()
+	if key, ok := nd.ipMap.GetKey(ipstr); ok {
+		nd.ipMap.Remove(key)
+	}
+	nd.ipMap.Put(int(r.Time.UnixNano()), ipstr)
+
+	// reset the expiration timer
+	//
 	nd.mutex.Lock()
 	defer nd.mutex.Unlock()
 
 	if nd.expireTimer != nil {
-
 		nd.expireTimer.Reset(r.Time.Sub(time.Now()) + nd.windowSize*time.Duration(nd.numWindows))
 	} else {
 		nd.expireTimer = time.NewTimer(r.Time.Sub(time.Now()) + nd.windowSize*time.Duration(nd.numWindows))
@@ -167,6 +187,10 @@ func (nd *NetworkData) updateStats() {
 	if nd.Total > 0 {
 		nd.Ratio = float64(nd.App) / float64(nd.Total)
 	}
+
+	nd.mutex.RLock()
+	defer nd.mutex.RUnlock()
+	nd.IPCount = nd.ipMap.Size()
 }
 
 // Total returns the total number of requests received from a network during the time window
@@ -191,6 +215,27 @@ func (nd *NetworkData) updateCount(field *int, stats *treemap.Map) {
 
 func (nd *NetworkData) keyFor(t time.Time) int {
 	return int(t.UnixNano() - t.UnixNano()%nd.windowSize.Nanoseconds())
+}
+
+func (nd *NetworkData) expireIPs() int {
+	threshold := int(time.Now().Add(-1 * nd.windowSize * time.Duration(nd.numWindows)).UnixNano())
+
+	nd.mutex.Lock()
+	defer nd.mutex.Unlock()
+
+	iter := nd.ipMap.Iterator()
+	numRemoved := 0
+
+	for iter.Next() {
+		key := iter.Key().(int)
+		if key >= threshold {
+			break
+		}
+		nd.ipMap.Remove(key)
+		numRemoved++
+	}
+
+	return numRemoved
 }
 
 func (nd *NetworkData) expireStats(stats *treemap.Map) int {
@@ -219,9 +264,13 @@ func (nd *NetworkData) expire() {
 	numRemoved += nd.expireStats(nd.totalMap)
 	numRemoved += nd.expireStats(nd.appMap)
 	numRemoved += nd.expireStats(nd.otherMap)
+
+	nd.expireIPs()
+
 	if numRemoved > 0 {
 		nd.updateStats()
 	}
+
 }
 
 // NewNetworks creates a new Networks instance
@@ -308,14 +357,24 @@ func (n *Networks) All() []*NetworkData {
 	return res
 }
 
-// Get returns the metadata and statistics for one network
-func (n *Networks) Get(ipn *net.IPNet) (nd *NetworkData, found bool) {
+// NetworkStats returns the metadata and statistics for one network
+func (n *Networks) NetworkStats(ipn *net.IPNet) (nd *NetworkData, found bool) {
 	n.mutex.RLock()
 	defer n.mutex.RUnlock()
 
 	nd, found = n.data[ipn.String()]
 
 	return nd, found
+}
+
+// ASNStats returns the metadata and statistics for an autonomous system
+func (n *Networks) ASNStats(asn int) (st *data.Stats, found bool) {
+	n.mutex.RLock()
+	defer n.mutex.RUnlock()
+
+	stats, found := n.asnData[asn]
+
+	return stats, found
 }
 
 // ShouldBeBlocked decides whether an IP should be blocked based on its network and/or ASN being blocked
@@ -373,6 +432,7 @@ func (n *Networks) APIHooks(r *gin.Engine) {
 	r.GET("/blocked/networks", n.apiGetBlockedNetworks)
 	r.GET("/blocked/asns", n.apiGetBlockedASNs)
 	r.GET("/networks", n.apiGetNetworks)
+	r.GET("/stats/asn/:asn", n.apiGetASNStats)
 }
 
 // IsWhitelisted determines whether an IP is whitelisted
@@ -415,6 +475,7 @@ func (n *Networks) updateAndBlock() {
 		stats.App += nd.App
 		stats.Other += nd.Other
 		stats.Ratio += nd.Ratio
+		stats.IPs = nd.IPCount
 		asnCounts[nd.ASN.ASN]++
 
 		stats, exists = nets[nd.ASN.Cidr]
@@ -429,6 +490,7 @@ func (n *Networks) updateAndBlock() {
 		stats.App += nd.App
 		stats.Other += nd.Other
 		stats.Ratio += nd.Ratio
+		stats.IPs = nd.IPCount
 		netCounts[nd.ASN.Cidr]++
 	}
 	n.mutex.RUnlock()
@@ -447,6 +509,7 @@ func (n *Networks) updateAndBlock() {
 					Total: stats.Total,
 					App:   stats.App,
 					Other: stats.Other,
+					IPs:   stats.IPs,
 					Ratio: stats.Ratio / float64(c),
 				},
 			})
@@ -468,6 +531,7 @@ func (n *Networks) updateAndBlock() {
 						Total: stats.Total,
 						App:   stats.App,
 						Other: stats.Other,
+						IPs:   stats.IPs,
 						Ratio: stats.Ratio / float64(c),
 					},
 				},
@@ -533,12 +597,26 @@ func (n *Networks) apiGetNetwork(c *gin.Context) {
 		c.AbortWithStatusJSON(http.StatusNotAcceptable, gin.H{"error": fmt.Sprintf("%s is not a valid network in CIDR notation", c.Param("cidr"))})
 		return
 	}
-	log.Infof("getting network %s", network)
-	nw, ok := n.Get(network)
+	nw, ok := n.NetworkStats(network)
 	if !ok {
 		c.AbortWithStatusJSON(http.StatusNotFound, gin.H{})
 		return
 	}
 
 	c.JSON(http.StatusOK, nw)
+}
+
+func (n *Networks) apiGetASNStats(c *gin.Context) {
+	asn, err := strconv.Atoi(c.Param("asn"))
+	if err != nil {
+		c.AbortWithStatusJSON(http.StatusNotAcceptable, gin.H{"error": fmt.Sprintf("%s is not a number", c.Param("asn"))})
+		return
+	}
+	st, ok := n.ASNStats(asn)
+	if !ok {
+		c.AbortWithStatusJSON(http.StatusNotFound, gin.H{})
+		return
+	}
+
+	c.JSON(http.StatusOK, st)
 }

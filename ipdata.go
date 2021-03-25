@@ -36,7 +36,7 @@ type IPDetails struct {
 // IPData contains IPDetails and the most recent HTTP requests.
 // It handles updating the aggregated stats when it receives new requests
 type IPData struct {
-	IPDetails
+	IPDetails    `json:"ipdetails"`
 	Requests     *Requests `json:"requests"`
 	ipUpdateChan chan data.IPStats
 	plugins      []Plugin

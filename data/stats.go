@@ -12,6 +12,7 @@ type Stats struct {
 	App   int        `json:"app"`
 	Other int        `json:"other"`
 	Ratio float64    `json:"ratio"`
+	IPs   int        `json:"ips"`
 	ASN   *asndb.ASN `json:"asn"`
 }
 
