@@ -11,6 +11,6 @@ type Plugin interface {
 	HandleRequest(r *data.Request)
 	APIHooks(r *gin.Engine)
 	SetBlocker(b data.Blocker)
-	ShouldBeBlocked(stats data.IPStats) (block bool)
+	ShouldBeBlocked(stats data.IPStats) (blocked bool, reason string)
 	IsWhitelisted(ip net.IP) bool
 }

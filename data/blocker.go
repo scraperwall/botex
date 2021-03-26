@@ -17,6 +17,6 @@ type Blocker interface {
 	ASNNamespace(asn int) []byte
 	CIDRNamespace(cidr string) []byte
 	IsBlocked(ip net.IP, asn *asndb.ASN) bool
-	IsBlockedByASN(asn *asndb.ASN) bool
+	IsBlockedByASN(asn *asndb.ASN) (blocked bool, reason string)
 	CheckBlocked()
 }

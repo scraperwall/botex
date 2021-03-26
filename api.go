@@ -50,6 +50,7 @@ func (a *API) run() {
 	a.router.GET("/blocked/ips", a.getBlockedIPs)
 	a.router.GET("/ip/:ip", a.getIP)
 	a.router.GET("/request-stats/:ip/:windows", a.getRequestStats)
+	a.router.GET("/ips", a.getIPs)
 
 	go endless.ListenAndServe(a.config.APIAddress, a.router)
 }
@@ -89,6 +90,54 @@ func (a *API) getBlockedIPs(c *gin.Context) {
 	}
 
 	c.JSON(http.StatusOK, blocked)
+}
+
+func (a *API) getIPs(c *gin.Context) {
+	sortBy := c.Query("sort")
+	byASN := c.Query("asn")
+	byNetwork := c.Query("network")
+
+	asnFilter := 0
+	if byASN != "" {
+		asn, err := strconv.Atoi(byASN)
+		if err == nil {
+			asnFilter = asn
+		}
+	}
+
+	var networkFilter *net.IPNet
+	if byNetwork != "" {
+		_, network, err := net.ParseCIDR(byNetwork)
+		if err == nil {
+			networkFilter = network
+		}
+	}
+
+	ips := make([]IPDetails, 0)
+
+	a.botex.history.Each(func(ipstr string, ipd *IPData) {
+		if asnFilter > 0 && ipd.ASN.ASN != asnFilter {
+			return
+		}
+
+		if networkFilter != nil && !networkFilter.Contains(ipd.IP) {
+			return
+		}
+
+		ips = append(ips, ipd.IPDetails)
+	})
+
+	if sortBy == "total" {
+		sort.Slice(ips, func(a, b int) bool {
+			return ips[a].Total > ips[b].Total
+		})
+	} else {
+		sort.Slice(ips, func(a, b int) bool {
+			return int(ips[a].CreatedAt.UnixNano()) > int(ips[b].CreatedAt.UnixNano())
+		})
+	}
+
+	c.JSON(http.StatusOK, ips)
 }
 
 func (a *API) getIP(c *gin.Context) {

@@ -150,10 +150,10 @@ func (ipd *IPData) ShouldBeBlocked() bool {
 	}
 
 	for _, plugin := range ipd.plugins {
-		if plugin.ShouldBeBlocked(ipd.IPStats()) {
+		if blocked, reason := plugin.ShouldBeBlocked(ipd.IPStats()); blocked {
 			decision = true
 			// log.Infof("blocked by network: %s", ipd.IP)
-			ipd.BlockReason = "blocked by ASN/network"
+			ipd.BlockReason = reason
 			goto RESOLVE
 		}
 	}

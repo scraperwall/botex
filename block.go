@@ -152,7 +152,7 @@ func (b *Block) BlockNetwork(msg data.NetworkBlockMessage) error {
 		return errors.New("network is nil")
 	}
 
-	if b.IsBlockedByASN(msg.ASN) {
+	if blocked, _ := b.IsBlockedByASN(msg.ASN); blocked {
 		return nil
 	}
 
@@ -186,15 +186,15 @@ func (b *Block) RemoveNetwork(network net.IPNet) error {
 }
 
 // GetNetworkretrieves an IPDetails item about a blocked IP. If the IP isn't blocked an error is returned
-func (b *Block) GetNetwork(network net.IPNet) (*net.IPNet, error) {
-	data, err := b.resources.Store.Get(b.CIDRNamespace(network.String()))
+func (b *Block) GetNetwork(network net.IPNet) (*data.BlockMessage, error) {
+	rawData, err := b.resources.Store.Get(b.CIDRNamespace(network.String()))
 	if err != nil {
 		return nil, err
 	}
 
-	var n net.IPNet
-	err = json.Unmarshal(data, &n)
-	return &n, err
+	var msg data.BlockMessage
+	err = json.Unmarshal(rawData, &msg)
+	return &msg, err
 }
 
 // AllNetworks returns all currently blocked IPs
@@ -246,7 +246,7 @@ func (b *Block) BlockASN(msg data.BlockMessage) error {
 		return errors.New("asn is nil")
 	}
 
-	if b.IsBlockedByASN(msg.ASN) {
+	if blocked, _ := b.IsBlockedByASN(msg.ASN); blocked {
 		return nil
 	}
 
@@ -284,16 +284,16 @@ func (b *Block) RemoveASN(asn *asndb.ASN) error {
 	return b.resources.Store.Remove(b.ASNNamespace(asn.ASN))
 }
 
-// GetASN retrieves a blocked ASN. If the aSN isn't blocked an error is returned
-func (b *Block) GetASN(asn *asndb.ASN) (*asndb.ASN, error) {
-	data, err := b.resources.Store.Get(b.ASNNamespace(asn.ASN))
+// GetASN retrieves a blocked ASN. If the ASN isn't blocked an error is returned
+func (b *Block) GetASN(asn *asndb.ASN) (*data.BlockMessage, error) {
+	rawData, err := b.resources.Store.Get(b.ASNNamespace(asn.ASN))
 	if err != nil {
 		return nil, err
 	}
 
-	var a asndb.ASN
-	err = json.Unmarshal(data, &a)
-	return &a, err
+	var msg data.BlockMessage
+	err = json.Unmarshal(rawData, &msg)
+	return &msg, err
 }
 
 // AllASNs returns all currently blocked IPs
@@ -332,16 +332,16 @@ func (b *Block) BlockedASNs() []data.BlockMessage {
 	return res
 }
 
-func (b *Block) IsBlockedByASN(asn *asndb.ASN) bool {
-	if _, err := b.GetASN(asn); err == nil {
-		return true
+func (b *Block) IsBlockedByASN(asn *asndb.ASN) (blocked bool, reason string) {
+	if msg, err := b.GetASN(asn); err == nil {
+		return true, msg.Reason
 	}
 
-	if _, err := b.GetNetwork(*asn.Network); err == nil {
-		return true
+	if msg, err := b.GetNetwork(*asn.Network); err == nil {
+		return true, msg.Reason
 	}
 
-	return false
+	return false, ""
 }
 
 func (b *Block) IsBlocked(ip net.IP, asn *asndb.ASN) bool {
@@ -349,7 +349,7 @@ func (b *Block) IsBlocked(ip net.IP, asn *asndb.ASN) bool {
 		return true
 	}
 
-	if b.IsBlockedByASN(asn) {
+	if blocked, _ := b.IsBlockedByASN(asn); blocked {
 		return true
 	}
 

@@ -296,7 +296,8 @@ func (b *Botex) blockASNNetWorker(blockChan chan bool) {
 		case <-blockChan:
 			toBlock := make([]data.IPStats, 0)
 			b.history.Each(func(ip string, ipd *IPData) {
-				if !ipd.ForceBlock && (ipd.IsBlocked || !b.blocked.IsBlockedByASN(ipd.ASN)) {
+				blockedByASN, _ := b.blocked.IsBlockedByASN(ipd.ASN)
+				if !ipd.ForceBlock && (ipd.IsBlocked || !blockedByASN) {
 					return
 				}
 

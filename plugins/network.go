@@ -378,13 +378,8 @@ func (n *Networks) ASNStats(asn int) (st *data.Stats, found bool) {
 }
 
 // ShouldBeBlocked decides whether an IP should be blocked based on its network and/or ASN being blocked
-func (n *Networks) ShouldBeBlocked(stats data.IPStats) bool {
-	// log.Infof("network checking asn/network block for %d %s", stats.ASN.ASN, stats.ASN.Organization)
-	if n.blocker.IsBlockedByASN(stats.ASN) {
-		// log.Infof("%s blocked by asn", stats.IP)
-		return true
-	}
-	return false
+func (n *Networks) ShouldBeBlocked(stats data.IPStats) (blocked bool, reason string) {
+	return n.blocker.IsBlockedByASN(stats.ASN)
 }
 
 // Averages returns the average of requests across all networks
@@ -503,7 +498,7 @@ func (n *Networks) updateAndBlock() {
 			numBlocked++
 			n.blocker.BlockASN(data.BlockMessage{
 				BlockedAt: time.Now(),
-				Reason:    fmt.Sprintf("asn has too many requests (%d/%d) and ratio is too high (%.2f/%.2f)", stats.Total/c, requestLimit, stats.Ratio/float64(c), n.config.MaxRatio),
+				Reason:    fmt.Sprintf("asn has too many requests (%d/%d) and ratio is too high (%.2f/%.2f)", stats.Total, requestLimit, stats.Ratio/float64(c), n.config.MaxRatio),
 				Stats: data.Stats{
 					ASN:   stats.ASN,
 					Total: stats.Total,
@@ -525,7 +520,7 @@ func (n *Networks) updateAndBlock() {
 				Network: stats.ASN.Network,
 				BlockMessage: data.BlockMessage{
 					BlockedAt: time.Now(),
-					Reason:    fmt.Sprintf("network has too many requests (%d/%d) and ratio is too high (%.2f/%.2f)", stats.Total/c, requestLimit, stats.Ratio/float64(c), n.config.MaxRatio),
+					Reason:    fmt.Sprintf("network has too many requests (%d/%d) and ratio is too high (%.2f/%.2f)", stats.Total, requestLimit, stats.Ratio/float64(c), n.config.MaxRatio),
 					Stats: data.Stats{
 						ASN:   stats.ASN,
 						Total: stats.Total,
