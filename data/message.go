@@ -8,19 +8,19 @@ import (
 )
 
 type BlockMessage struct {
-	Stats
+	Stats                 //`json:"stats"`
 	Reason    string      `json:"reason"`
 	City      *geoip.City `json:"city"`
 	BlockedAt time.Time   `json:"blocked_at"`
 }
 
 type IPBlockMessage struct {
-	BlockMessage
-	IP       net.IP `json:"ip"`
-	Hostname string `json:"hostname"`
+	BlockMessage        //`json:"blockmessage"`
+	IP           net.IP `json:"ip"`
+	Hostname     string `json:"hostname"`
 }
 
 type NetworkBlockMessage struct {
-	BlockMessage
-	Network *net.IPNet `json:"network"`
+	BlockMessage            //`json:"blockmessage"`
+	Network      *net.IPNet `json:"network"`
 }

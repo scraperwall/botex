@@ -120,16 +120,17 @@ func (b *Block) BlockedIPs() []data.IPBlockMessage {
 }
 
 // AllIPs returns all currently blocked IPs
-func (b *Block) AllIPs() ([]*IPDetails, error) {
-	data, err := b.resources.Store.All(b.IPNamespace([]byte{}))
+func (b *Block) AllIPs() ([]*data.IPBlockMessage, error) {
+	namespace := b.IPNamespace([]byte{})
+	dataBytes, err := b.resources.Store.All(namespace)
 	if err != nil {
 		return nil, err
 	}
 
-	res := make([]*IPDetails, len(data))
+	res := make([]*data.IPBlockMessage, len(dataBytes))
 
-	for i, jsonBytes := range data {
-		res[i] = new(IPDetails)
+	for i, jsonBytes := range dataBytes {
+		res[i] = new(data.IPBlockMessage)
 		err = json.Unmarshal(jsonBytes, &res[i])
 		if err != nil {
 			return nil, err
@@ -388,6 +389,7 @@ func (b *Block) cleanup() {
 				}
 
 				if wl, _ := b.resources.Whitelist.IsWhitelisted(&ipd); wl {
+					ipd.Whitelisted = true
 					b.RemoveIP(ipd.IP)
 				}
 			})
@@ -400,7 +402,7 @@ func (b *Block) CheckBlocked() {
 }
 
 func (b *Block) IPNamespace(ip []byte) []byte {
-	return []byte(fmt.Sprintf("%s:%s:%s", blockNamespace, "ip", ip))
+	return []byte(fmt.Sprintf("%s:ip:%s", blockNamespace, ip))
 }
 
 func (b *Block) ASNNamespace(asn int) []byte {

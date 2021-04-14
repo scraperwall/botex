@@ -175,12 +175,14 @@ func (bdb *BadgerDB) All(prefix []byte) ([][]byte, error) {
 	err := bdb.db.View(func(txn *badger.Txn) error {
 		it := txn.NewIterator(badger.DefaultIteratorOptions)
 		defer it.Close()
-		// prefix := bdb.badgerNamespaceKey(prefix)
 		for it.Seek(prefix); it.ValidForPrefix(prefix); it.Next() {
 			item := it.Item()
 			err := item.Value(func(v []byte) error {
-				data := make([]byte, 0)
-				copy(data, v)
+				data := make([]byte, len(v))
+				bytesCopied := copy(data, v)
+				if bytesCopied <= 0 {
+					log.Warnf("not enough bytes copied: %d", bytesCopied)
+				}
 				res = append(res, data)
 				return nil
 			})

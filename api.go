@@ -8,11 +8,13 @@ import (
 	"net/http"
 	"sort"
 	"strconv"
+	"sync"
 	"time"
 
 	"github.com/fvbock/endless"
 	"github.com/gin-contrib/cors"
 	"github.com/gin-gonic/gin"
+	"github.com/gorilla/websocket"
 	"github.com/scraperwall/botex/config"
 	"github.com/scraperwall/botex/data"
 	log "github.com/sirupsen/logrus"
@@ -20,19 +22,23 @@ import (
 
 // API provides the HTTP REST API for botex
 type API struct {
-	botex     *Botex
-	router    *gin.Engine
-	config    *config.Config
-	resources *Resources
-	ctx       context.Context
+	botex                 *Botex
+	router                *gin.Engine
+	config                *config.Config
+	resources             *Resources
+	websocketClients      map[*websocket.Conn]chan bool
+	websocketClientsMutex sync.RWMutex
+	ctx                   context.Context
 }
 
 // NewAPI creates a new REST-API for botex
 func NewAPI(ctx context.Context, config *config.Config, botex *Botex) (api *API, err error) {
 	api = &API{
-		config: config,
-		ctx:    ctx,
-		botex:  botex,
+		config:                config,
+		websocketClients:      make(map[*websocket.Conn]chan bool),
+		websocketClientsMutex: sync.RWMutex{},
+		ctx:                   ctx,
+		botex:                 botex,
 	}
 
 	api.run()
@@ -51,8 +57,72 @@ func (a *API) run() {
 	a.router.GET("/ip/:ip", a.getIP)
 	a.router.GET("/request-stats/:ip/:windows", a.getRequestStats)
 	a.router.GET("/ips", a.getIPs)
+	a.router.GET("/stats", a.getStats)
+	a.router.GET("/ws", func(c *gin.Context) {
+		a.websocketHandler(c.Writer, c.Request)
+	})
 
+	go a.processWebsocketData()
 	go endless.ListenAndServe(a.config.APIAddress, a.router)
+}
+
+func (a *API) processWebsocketData() {
+	for {
+		select {
+		case <-a.ctx.Done():
+			a.websocketClientsMutex.Lock()
+			for conn, ch := range a.websocketClients {
+				conn.Close()
+				ch <- true
+				delete(a.websocketClients, conn)
+			}
+			a.websocketClientsMutex.Unlock()
+			return
+		case item := <-a.botex.websocketChan:
+			deadline := time.Now().Add(3 * time.Second)
+			a.websocketClientsMutex.Lock()
+			for conn, ch := range a.websocketClients {
+				conn.SetWriteDeadline(deadline)
+				err := conn.WriteJSON(item)
+				if err != nil {
+					log.Error(err)
+					conn.Close()
+					delete(a.websocketClients, conn) // delete the connection from our pool
+					ch <- true                       // notify the handler function to terminate
+				}
+			}
+			a.websocketClientsMutex.Unlock()
+		}
+	}
+}
+
+func (a *API) websocketHandler(w http.ResponseWriter, r *http.Request) {
+	wsupgrader := websocket.Upgrader{
+		ReadBufferSize:  1024,
+		WriteBufferSize: 1024,
+		CheckOrigin: func(r *http.Request) bool {
+			return true
+		},
+	}
+
+	conn, err := wsupgrader.Upgrade(w, r, nil)
+	if err != nil {
+		log.Errorf("Failed to set websocket upgrade: %s", err)
+		return
+	}
+	defer conn.Close()
+	doneChan := make(chan bool)
+	defer close(doneChan)
+	a.websocketClientsMutex.Lock()
+	a.websocketClients[conn] = doneChan
+	a.websocketClientsMutex.Unlock()
+
+	// send initial data to the client
+	//
+	a.botex.sendBlockedIPsToWebsocket()
+
+	<-doneChan
+	log.Tracef("leaving websocket handler")
 }
 
 func (a *API) getBlockedIPs(c *gin.Context) {
@@ -159,6 +229,10 @@ func (a *API) getIP(c *gin.Context) {
 	data.Useragents = ipdata.Requests.Useragents()
 
 	c.JSON(http.StatusOK, data)
+}
+
+func (a *API) getStats(c *gin.Context) {
+	c.JSON(http.StatusOK, a.botex.history.stats.All())
 }
 
 func (a *API) getRequestStats(c *gin.Context) {

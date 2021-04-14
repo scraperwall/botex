@@ -27,12 +27,13 @@ const natsRequestsSubject = "requests"
 type Botex struct {
 	natsSubscriptions []*nats.Subscription
 
-	history   *History
-	blocked   *Block
-	config    *config.Config
-	resources *Resources
-	api       *API
-	plugins   []Plugin
+	history       *History
+	blocked       *Block
+	config        *config.Config
+	resources     *Resources
+	api           *API
+	plugins       []Plugin
+	websocketChan chan interface{}
 
 	ctx context.Context
 }
@@ -180,6 +181,7 @@ func New(ctx context.Context, config *config.Config) (*Botex, error) {
 		resources:         resources,
 		natsSubscriptions: make([]*nats.Subscription, 0),
 		plugins:           make([]Plugin, 0),
+		websocketChan:     make(chan interface{}, 50),
 		ctx:               ctx,
 	}
 
@@ -349,6 +351,11 @@ func (b *Botex) blockWorker() {
 				log.Errorf("failed to write blocked IP %s to store: %s", block.IP, err)
 			}
 			block.IsBlocked = true
+			b.websocketChan <- map[string]interface{}{
+				"type":   "Blocked",
+				"action": "blockedIPUpdated",
+				"data":   msg,
+			}
 		}
 	}
 }
@@ -395,4 +402,26 @@ func (b *Botex) statsLogWorker() {
 			log.Infof("stats :: %d IPs / %d with hostname / %d blocked :: Requests %d Total / %d App / %d Other / %.2f Ratio", numIPs, stats.WithHostname, b.blocked.CountIPs(), stats.Total, stats.App, stats.Other, stats.Ratio)
 		}
 	}
+}
+
+// sendBlockedIPsToWebsocket sends all required data to the websocket
+func (b *Botex) sendBlockedIPsToWebsocket() {
+	blockedIPs, err := b.blocked.AllIPs()
+	if err != nil {
+		log.Errorf("send blocked IPs to webebsocket error: %s", err)
+		return
+	}
+
+	// Blocked IPs
+	data := map[string]interface{}{
+		"type":   "BlockedIPs",
+		"action": "blockedIPsUpdated",
+		"data":   blockedIPs,
+	}
+	select {
+	case b.websocketChan <- data:
+	default:
+		log.Warn("failed to send blacklist to websocket!")
+	}
+
 }

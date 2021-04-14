@@ -50,7 +50,10 @@ type IPData struct {
 // the parent context and app configuration are passed on from the parent
 func NewIPData(updateChan chan data.IPStats, ip net.IP, plugins []Plugin, resources *Resources, config *config.Config) *IPData {
 	asn := resources.ASNDB.Lookup(ip)
-	geo, _ := resources.GEOIPDB.Lookup(ip)
+	geo, err := resources.GEOIPDB.Lookup(ip)
+	if err != nil {
+		log.Errorf("failed to load GeoIP for %s: %s", ip, err)
+	}
 
 	ipd := &IPData{
 		IPDetails: IPDetails{
@@ -73,13 +76,22 @@ func NewIPData(updateChan chan data.IPStats, ip net.IP, plugins []Plugin, resour
 		Requests:     NewRequests(ip, updateChan, config),
 	}
 
+	ipd.Whitelisted, ipd.WhitelistReason = resources.Whitelist.IsWhitelisted(&ipd.IPDetails)
+
 	return ipd
 }
 
 // Add adds a single HTTP request
-func (ipd *IPData) Add(r *data.Request) {
+func (ipd *IPData) Add(r *data.Request) Decision {
 	ipd.UpdatedAt = time.Now()
 	ipd.Requests.Add(r)
+	if ipd.IsBlocked {
+		return IsBlocked
+	}
+	if ipd.Whitelisted {
+		return IsWhitelisted
+	}
+	return IsHuman
 }
 
 // Update sets the cached statistics numbers using an IPStats item
@@ -94,6 +106,7 @@ func (ipd *IPData) Update(stats data.IPStats, force bool) {
 			ipd.ForceBlock = true
 		}
 		ipd.LastBlockAt = now
+		log.Infof("blocking %s (%s)", ipd.IP, ipd.GeoIP.City.Name)
 		ipd.resources.BlockChan <- &ipd.IPDetails
 	}
 }

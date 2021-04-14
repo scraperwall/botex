@@ -30,7 +30,11 @@ func main() {
 		for it.Seek([]byte(*prefix)); it.ValidForPrefix([]byte(*prefix)); it.Next() {
 			item := it.Item()
 			err := item.Value(func(v []byte) error {
-				fmt.Println(string(item.Key()))
+				item.Value(func(v []byte) error {
+					fmt.Printf("%s = %s\n", item.Key(), string(v))
+					return nil
+				})
+
 				return nil
 			})
 			if err != nil {

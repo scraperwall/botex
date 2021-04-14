@@ -11,11 +11,20 @@ import (
 	log "github.com/sirupsen/logrus"
 )
 
+type Decision int
+
+const (
+	IsBlocked Decision = iota
+	IsHuman
+	IsWhitelisted
+)
+
 // History is the history of all IPs for which the application has received a request
 type History struct {
 	config       *config.Config
 	resources    *Resources
 	data         map[string]*IPData
+	stats        *StatsWindows
 	plugins      []Plugin
 	mutex        sync.RWMutex
 	windowSize   time.Duration
@@ -29,6 +38,7 @@ func NewHistory(ctx context.Context, plugins []Plugin, resources *Resources, con
 		config:       config,
 		resources:    resources,
 		data:         make(map[string]*IPData),
+		stats:        NewStatsWindows(resources, config),
 		plugins:      plugins,
 		windowSize:   config.WindowSize,
 		numWindows:   config.NumWindows,
@@ -58,6 +68,8 @@ func NewHistory(ctx context.Context, plugins []Plugin, resources *Resources, con
 }
 
 func (h *History) expire() {
+	go h.stats.Expire()
+
 	h.mutex.Lock()
 	defer h.mutex.Unlock()
 
@@ -106,6 +118,11 @@ func (h *History) Add(r *data.Request) bool {
 	newIP := false
 
 	ip := net.ParseIP(r.Source)
+	if ip == nil {
+		log.Warnf("IP %s failed to parse", r.Source)
+		return false
+	}
+
 	ipstr := ip.String()
 
 	h.mutex.Lock()
@@ -121,7 +138,11 @@ func (h *History) Add(r *data.Request) bool {
 	ipd, ok := h.data[ipstr]
 	h.mutex.RUnlock()
 	if ok {
-		ipd.Add(r)
+		decision := ipd.Add(r)
+		err := h.stats.Add(decision, r.Time)
+		if err != nil {
+			log.Warnf("failed to add request to stats: %s", err)
+		}
 	}
 
 	log.Tracef("history added %s %s", ipstr, r.URL)
