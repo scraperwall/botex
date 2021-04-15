@@ -83,6 +83,11 @@ func (h *History) expire() {
 		if numExpired <= 0 {
 			log.Tracef("IPData for %s is empty. Removing it.", ip)
 			delete(h.data, ip)
+			h.resources.WebsocketChan <- map[string]interface{}{
+				"type":   "ExpiredIP",
+				"action": "expireIP",
+				"data":   ip,
+			}
 		}
 	}
 }
@@ -114,13 +119,13 @@ func (h *History) Each(callback func(key string, ipd *IPData)) {
 
 // Add adds a single HTTP request to the history
 // If Add has added a new item to the data map it returns true, otherwise it returns false
-func (h *History) Add(r *data.Request) bool {
-	newIP := false
+func (h *History) Add(r *data.Request) (ipd *IPData, newIP bool) {
+	newIP = false
 
 	ip := net.ParseIP(r.Source)
 	if ip == nil {
 		log.Warnf("IP %s failed to parse", r.Source)
-		return false
+		return nil, false
 	}
 
 	ipstr := ip.String()
@@ -147,7 +152,7 @@ func (h *History) Add(r *data.Request) bool {
 
 	log.Tracef("history added %s %s", ipstr, r.URL)
 
-	return newIP
+	return ipd, newIP
 }
 
 // SetHostname sets the reverse hotname for a given IP

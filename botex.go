@@ -27,13 +27,12 @@ const natsRequestsSubject = "requests"
 type Botex struct {
 	natsSubscriptions []*nats.Subscription
 
-	history       *History
-	blocked       *Block
-	config        *config.Config
-	resources     *Resources
-	api           *API
-	plugins       []Plugin
-	websocketChan chan interface{}
+	history   *History
+	blocked   *Block
+	config    *config.Config
+	resources *Resources
+	api       *API
+	plugins   []Plugin
 
 	ctx context.Context
 }
@@ -49,7 +48,14 @@ func (b *Botex) HandleRequest(r *data.Request) {
 	ip := net.ParseIP(r.Source)
 
 	log.Tracef("received %s - %s", ip, r.URL)
-	b.history.Add(r)
+	ipd, newIP := b.history.Add(r)
+	if newIP {
+		b.resources.WebsocketChan <- map[string]interface{}{
+			"type":   "NewIP",
+			"action": "newIP",
+			"data":   ipd,
+		}
+	}
 	log.Tracef("added %s to history", ip)
 
 	r.ASN = b.resources.ASNDB.Lookup(ip)
@@ -181,7 +187,6 @@ func New(ctx context.Context, config *config.Config) (*Botex, error) {
 		resources:         resources,
 		natsSubscriptions: make([]*nats.Subscription, 0),
 		plugins:           make([]Plugin, 0),
-		websocketChan:     make(chan interface{}, 50),
 		ctx:               ctx,
 	}
 
@@ -351,7 +356,7 @@ func (b *Botex) blockWorker() {
 				log.Errorf("failed to write blocked IP %s to store: %s", block.IP, err)
 			}
 			block.IsBlocked = true
-			b.websocketChan <- map[string]interface{}{
+			b.resources.WebsocketChan <- map[string]interface{}{
 				"type":   "Blocked",
 				"action": "blockedIPUpdated",
 				"data":   msg,
@@ -419,7 +424,7 @@ func (b *Botex) sendBlockedIPsToWebsocket() {
 		"data":   blockedIPs,
 	}
 	select {
-	case b.websocketChan <- data:
+	case b.resources.WebsocketChan <- data:
 	default:
 		log.Warn("failed to send blacklist to websocket!")
 	}

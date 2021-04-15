@@ -9,17 +9,20 @@ import (
 )
 
 type Resources struct {
-	ASNDB      *asndb.DB
-	GEOIPDB    *geoip.DB
-	NatsServer *natsd.Server
-	NatsConn   *nats.Conn
-	Store      store.KVStore
-	Whitelist  *Whitelist
-	Resolver   *Resolver
+	ASNDB         *asndb.DB
+	GEOIPDB       *geoip.DB
+	NatsServer    *natsd.Server
+	NatsConn      *nats.Conn
+	Store         store.KVStore
+	Whitelist     *Whitelist
+	Resolver      *Resolver
+	WebsocketChan chan interface{}
 
 	BlockChan chan *IPDetails
 }
 
 func NewResources() *Resources {
-	return &Resources{}
+	return &Resources{
+		WebsocketChan: make(chan interface{}, 100),
+	}
 }

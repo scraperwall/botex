@@ -25,7 +25,6 @@ type API struct {
 	botex                 *Botex
 	router                *gin.Engine
 	config                *config.Config
-	resources             *Resources
 	websocketClients      map[*websocket.Conn]chan bool
 	websocketClientsMutex sync.RWMutex
 	ctx                   context.Context
@@ -78,7 +77,7 @@ func (a *API) processWebsocketData() {
 			}
 			a.websocketClientsMutex.Unlock()
 			return
-		case item := <-a.botex.websocketChan:
+		case item := <-a.botex.resources.WebsocketChan:
 			deadline := time.Now().Add(3 * time.Second)
 			a.websocketClientsMutex.Lock()
 			for conn, ch := range a.websocketClients {
