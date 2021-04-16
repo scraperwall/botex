@@ -69,6 +69,11 @@ func main() {
 	flag.StringVar(&config.WhitelistTOML, "whitelist", "./etc/whitelist.toml", "the whitelist configuration file")
 	flag.BoolVar(&config.WithNetworks, "networks", false, "analyze requests on a per-network basis")
 	flag.BoolVar(&config.ClearBlocked, "clear-blocked", false, "removes all blocked items from the database")
+	flag.StringVar(&config.SocketFile, "socket-file", "", "the name of the Unix domain socket file to use. Serves as interface block requests in webservers")
+	flag.BoolVar(&config.IgnorePrivateIPs, "ignore-private-ips", true, "ignore private non-routable IPs")
+	flag.StringVar(&config.CookieName, "cookie-name", "scw", "the name of the human verification cookie set by the external captcha service")
+	flag.StringVar(&config.CookieKey, "cookie-key", "", "the human cookie AES-256 key (base64-encoded)")
+	flag.StringVar(&config.CookieSecret, "cookie-secret", "", "the secret to use inside the encrypted human cookie")
 
 	flag.Parse()
 

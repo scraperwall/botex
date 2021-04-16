@@ -27,12 +27,13 @@ const natsRequestsSubject = "requests"
 type Botex struct {
 	natsSubscriptions []*nats.Subscription
 
-	history   *History
-	blocked   *Block
-	config    *config.Config
-	resources *Resources
-	api       *API
-	plugins   []Plugin
+	history         *History
+	blocked         *Block
+	config          *config.Config
+	resources       *Resources
+	webserverSocket *WebserverSocket
+	api             *API
+	plugins         []Plugin
 
 	ctx context.Context
 }
@@ -232,6 +233,15 @@ func New(ctx context.Context, config *config.Config) (*Botex, error) {
 
 	if config.LogMemoryStats {
 		go b.logMemoryStats(ctx)
+	}
+
+	// Start the WebserverSocket if all required configuration options are set
+	//
+	if config.CookieKey != "" && config.CookieName != "" && config.CookieSecret != "" {
+		b.webserverSocket, err = NewWebserverSocket(ctx, config, b.blocked)
+		if err != nil {
+			return nil, err
+		}
 	}
 
 	go b.resolvWorker(resolvChan)
