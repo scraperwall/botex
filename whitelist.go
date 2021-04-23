@@ -197,7 +197,7 @@ func (wl *Whitelist) Load() error {
 	uaPatterns := make([]string, len(rules.Useragent))
 	for i, r := range rules.Useragent {
 		uaPatterns[i] = r.Pattern
-		rules.ServerPath[i].Regexp, err = regexp.Compile(fmt.Sprintf("^%s$", r.Pattern))
+		rules.Useragent[i].Regexp, err = regexp.Compile(fmt.Sprintf("^%s$", r.Pattern))
 		if err != nil {
 			return fmt.Errorf("can't parse whitelist useragent regexp %s (%s): %s", r.Pattern, r.Description, err)
 		}

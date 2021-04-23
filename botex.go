@@ -226,6 +226,11 @@ func New(ctx context.Context, config *config.Config) (*Botex, error) {
 		log.Infof("networks enabled")
 	}
 
+	// ASN/GeoIP data API
+	ipmetaPlugin := plugins.NewIPMeta(resources.ASNDB, resources.GEOIPDB)
+	b.Use(ipmetaPlugin)
+	log.Info("IP meta API plugin enabled")
+
 	// History
 	//
 	b.history = NewHistory(ctx, b.plugins, b.resources, config)
