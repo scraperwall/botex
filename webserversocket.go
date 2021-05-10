@@ -191,12 +191,13 @@ func (wss *WebserverSocket) hasValidCaptchaCookie(cookies string, ips []net.IP) 
 
 		// log.Printf("cookie: %s\n", cookie)
 		if strings.HasPrefix(cookie, fmt.Sprintf("%s=", wss.config.CookieName)) {
-			name := cookie[0:strings.Index(cookie, "=")]
+			idx := strings.Index(cookie, "=")
+			name := cookie[0:idx]
 			if name != wss.config.CookieName {
 				continue
 			}
 
-			value := cookie[strings.Index(cookie, "=")+1:]
+			value := cookie[idx+1:]
 
 			if l := len(wss.cookieKeyBin); l != 32 {
 				log.Errorf("cookie key has wrong length: %d instead of 32. Letting IP pass", l)

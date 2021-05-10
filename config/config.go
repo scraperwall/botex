@@ -16,6 +16,9 @@ type Config struct {
 	NatsHTTPPort     int
 	NatsUser         string
 	NatsPassword     string
+	NatsCA           string
+	NatsCert         string
+	NatsKey          string
 	GeoIPDBFile      string
 	ASNDBFile        string
 	KeepRequests     int

@@ -130,6 +130,22 @@ func New(ctx context.Context, config *config.Config) (*Botex, error) {
 		TraceVerbose: true,
 	}
 
+	if config.NatsCA != "" && config.NatsCert != "" && config.NatsKey != "" {
+		tlsconfig, err := natsd.GenTLSConfig(&natsd.TLSConfigOpts{
+			CertFile: config.NatsCert,
+			KeyFile:  config.NatsKey,
+			CaFile:   config.NatsCA,
+			Verify:   false,
+			Insecure: true,
+		})
+
+		if err != nil {
+			log.Fatal(err)
+		}
+
+		nopts.TLSConfig = tlsconfig
+	}
+
 	resources.NatsServer = natsd.New(nopts)
 	go resources.NatsServer.Start()
 	if !resources.NatsServer.ReadyForConnections(2 * time.Second) {
