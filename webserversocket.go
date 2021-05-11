@@ -105,7 +105,6 @@ func (wss *WebserverSocket) serve(conn net.Conn) {
 		Useragent string            `json:"useragent"`
 		Headers   map[string]string `json:"headers"`
 		Method    string            `json:"method"`
-		// Host      string            `json:"host"`
 	}
 	var err error
 
@@ -136,7 +135,7 @@ func (wss *WebserverSocket) serve(conn net.Conn) {
 
 			wss.requestHandler(&data.Request{
 				URL:       serverData.URL,
-				Host:      serverData.Headers["Host"],
+				Host:      serverData.Headers["host"],
 				UserAgent: serverData.Useragent,
 				Source:    ip,
 				Method:    serverData.Method,

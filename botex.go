@@ -259,7 +259,7 @@ func New(ctx context.Context, config *config.Config) (*Botex, error) {
 	// Start the WebserverSocket if all required configuration options are set
 	//
 	if config.CookieKey != "" && config.CookieName != "" && config.CookieSecret != "" && config.SocketFile != "" {
-		b.webserverSocket, err = NewWebserverSocket(ctx, config, b.blocked)
+		b.webserverSocket, err = NewWebserverSocket(ctx, config, b.blocked, b.HandleRequest)
 		if err != nil {
 			return nil, err
 		}
