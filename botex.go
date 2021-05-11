@@ -258,7 +258,7 @@ func New(ctx context.Context, config *config.Config) (*Botex, error) {
 
 	// Start the WebserverSocket if all required configuration options are set
 	//
-	if config.CookieKey != "" && config.CookieName != "" && config.CookieSecret != "" {
+	if config.CookieKey != "" && config.CookieName != "" && config.CookieSecret != "" && config.SocketFile != "" {
 		b.webserverSocket, err = NewWebserverSocket(ctx, config, b.blocked)
 		if err != nil {
 			return nil, err
@@ -338,8 +338,6 @@ func (b *Botex) blockASNNetWorker(blockChan chan bool) {
 				if !ipd.ForceBlock && (ipd.IsBlocked || !blockedByASN) {
 					return
 				}
-
-				// log.Infof("netblock %s - %d (%s)", ipd.IP, ipd.ASN.ASN, ipd.ASN.Organization)
 
 				toBlock = append(toBlock, data.IPStats{
 					IP: ipd.IP,

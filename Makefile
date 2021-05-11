@@ -10,7 +10,7 @@ image:
 	docker build \
     --rm \
     --build-arg VERSION=$(VERSION) \
-    --build-arg BUILD="$(BUILDDATE)" \
+    --build-arg BUILDDATE="$(BUILDDATE)" \
     --build-arg HOST=$(HOST) \
 		-t registry.scw.systems/$(NAME):latest \
 		-t registry.scw.systems/$(NAME):$(VERSION) \
@@ -29,7 +29,7 @@ compile:
         -tags netgo \
         -a -v \
         -mod=vendor \
-        -ldflags "-s -X main.Version="$(VERSION)" -X main.BuildDate="$(BUILDDATE)" -X main.BuildHost="$(HOST)" -extldflags 'static'"
+        -ldflags "-s -X main.Version=$(VERSION) -X main.BuildDate=$(BUILDDATE) -X main.BuildHost=$(HOST) -extldflags 'static'"
 
 
 
