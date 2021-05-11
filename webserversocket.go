@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"github.com/scraperwall/botex/config"
+	"github.com/scraperwall/botex/data"
 	log "github.com/sirupsen/logrus"
 )
 
@@ -29,17 +30,19 @@ type WebserverSocket struct {
 	block           *Block
 	cookieKeyBin    []byte
 	privateIPBlocks []*net.IPNet
+	requestHandler  func(*data.Request)
 	config          *config.Config
 	mutex           sync.RWMutex
 	ctx             context.Context
 }
 
-func NewWebserverSocket(ctx context.Context, config *config.Config, block *Block) (*WebserverSocket, error) {
+func NewWebserverSocket(ctx context.Context, config *config.Config, block *Block, requestHandler func(*data.Request)) (*WebserverSocket, error) {
 	var err error
 
 	wss := WebserverSocket{
 		privateIPBlocks: make([]*net.IPNet, 0),
 		block:           block,
+		requestHandler:  requestHandler,
 		config:          config,
 		mutex:           sync.RWMutex{},
 		ctx:             ctx,
@@ -95,9 +98,14 @@ func (wss *WebserverSocket) run() {
 
 func (wss *WebserverSocket) serve(conn net.Conn) {
 	var serverData struct {
-		IP      string `json:"ip"`
-		Xff     string `json:"xff"`
-		Cookies string `json:"cookies"`
+		URL       string            `json:"url"`
+		IP        string            `json:"ip"`
+		Xff       string            `json:"xff"`
+		Cookies   string            `json:"cookies"`
+		Useragent string            `json:"useragent"`
+		Headers   map[string]string `json:"headers"`
+		Method    string            `json:"method"`
+		// Host      string            `json:"host"`
 	}
 	var err error
 
@@ -116,6 +124,27 @@ func (wss *WebserverSocket) serve(conn net.Conn) {
 			continue
 		}
 
+		if wss.requestHandler != nil {
+			ip := serverData.IP
+			if serverData.Xff != "" {
+				xips := strings.Split(serverData.Xff, ",")
+				if len(xips) > 0 {
+					ip = strings.TrimSpace(xips[0])
+				}
+			}
+			ts := time.Now()
+
+			wss.requestHandler(&data.Request{
+				URL:       serverData.URL,
+				Host:      serverData.Headers["Host"],
+				UserAgent: serverData.Useragent,
+				Source:    ip,
+				Method:    serverData.Method,
+				Seq:       0,
+				Timestamp: ts.UnixNano(),
+				Time:      ts,
+			})
+		}
 		log.Printf("ip: %s, xff: %s, cookies: %s\n", serverData.IP, serverData.Xff, serverData.Cookies)
 		conn.Write([]byte(wss.decide(serverData.IP, serverData.Xff, serverData.Cookies) + "\n"))
 	}

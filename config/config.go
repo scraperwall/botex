@@ -38,6 +38,7 @@ type Config struct {
 	WithNetworks     bool
 	ClearBlocked     bool
 	SocketFile       string
+	WebsocketIngest  bool
 	IgnorePrivateIPs bool
 	CookieName       string
 	CookieKey        string
