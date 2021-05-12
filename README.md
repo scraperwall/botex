@@ -98,7 +98,7 @@ and in order to analyze the log file you would start botex with the following pa
            -resolver-workers 50 \
            -dns-server 192.168.1.1:53 \
            -asndb-file ./GeoLite2-ASN-CSV_20210511.zip \
-	   -geoipdb-file ./GeoLite2-City_20210511.tar.gz
+	   -geoipdb-file ./GeoLite2-City_20210511.tar.gz \
            -window-size 1m \
            -keep-requests 500 \
            -num-windows 60 \
