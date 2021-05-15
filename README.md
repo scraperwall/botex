@@ -80,6 +80,66 @@ If you would like to see which URLs an IP has requested, botex remembers the lat
 
 lets botex keep the 100 latest requests per IP address.
 
+## Whitelisting
+
+There are guaranteed to be IP addresses which you don't want blocked no matter what. Those IPs can be whitelisted in a TOML file using a wide range of filters. 
+
+	[[ClientHost]]
+	Pattern = ".+\\.googlebot\\.com"
+	Description = "Googlebot"
+
+	[[ClientHost]]
+	Pattern = ".+\\.search\\.msn\\.com"
+	Description = "Bing Bot"
+
+	[[ASN]]
+	Pattern = "714"
+	Description = "Apple"
+
+	[[IP]]
+	Pattern = "165\\.73\\.12\\.251"
+	Description = "Monitoring"
+
+	[[CIDR]]
+	Pattern = "23.15.155.0/24"
+	Description = "Partner Network"
+
+	[[ServerHost]]
+	Pattern = "cdn.+\\.mydomain\\.com"
+	Description = "CDN"
+
+	[[ServerPath]]
+	Pattern = "/checkout/.+"
+	Description = "Checkout Process"
+
+	[[Useragent]]
+	Pattern = "mymonitor/1\..+ (136228b8b06f9296)"
+	Description = "Internal Monitor"
+
+All Patterns except for ASN and CIDR are evaluated as regular expressions. Backslashes (\\) need to be escaped as demonstrated above.
+
+**ClientHost** can be used to whitelist remote hosts such as those from which the Google Bot visits websites.
+
+With **ASN** an entire autonomous system (i.e. an entire company) can be whitelisted. In the example above Apple is whitelisted through its autonomous system number (ASN) 714.
+
+**IP** can whitelist IP addresses. Since the pattern is evaluated as a regular expression whitelisting more than one IP is possible: 
+
+	Pattern = "112\\.47\\..+
+
+whitelistes all IPs that start with 112.47.
+
+**CIDR** can be used to whitelist entire networks. Use the CIDR notation as demonstrated above.
+
+If there are hosts on your side that you don't want to be observed for some reason, use ***ServerHost*** to whitelist them. 
+
+	Pattern = "cdn.+\\.mysite\\.com"
+
+would whitelist all traffic to your CDN servers, e.g. *cdn1.mysite.com* or *cdn-34-euwest.mysite.com*.
+
+***ServerPath*** can in analogy be used to ignore traffic for specific URLs, for example if you don't want botex to count requests once a customer has entered the checkout process.
+
+With ***Useragent*** you can whitelist clients by their user agent. This should only be the last resort if all other whitelist options fail since faking a user agent is extremely easy.
+
 ### Complete Example
 
 The log file contains log entries that are formatted like this:
@@ -98,13 +158,14 @@ and in order to analyze the log file you would start botex with the following pa
            -resolver-workers 50 \
            -dns-server 192.168.1.1:53 \
            -asndb-file ./GeoLite2-ASN-CSV_20210511.zip \
-	   -geoipdb-file ./GeoLite2-City_20210511.tar.gz \
+           -geoipdb-file ./GeoLite2-City_20210511.tar.gz \
            -window-size 1m \
            -keep-requests 500 \
            -num-windows 60 \
            -max-app-requests 150 \
            -max-ratio 0.91  \
            -networks \
+		   -whitelist ./whitelist.toml \
            -clear-blocked
 
 
@@ -284,7 +345,5 @@ All available information about a single IP address can be retrieved, too:
 There is a web GUI available at [github.com/scraperwall/botex-admin](https://github.com/scraperwall/botex-admin)
 
 ## License
-
-License
 
 Unless otherwise noted, the botex source files are distributed under the GNU AGPLv3 license found in the LICENSE file.
