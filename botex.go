@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"net"
+	"regexp"
 	"runtime"
 	"time"
 
@@ -34,6 +35,7 @@ type Botex struct {
 	webserverSocket *WebserverSocket
 	api             *API
 	plugins         []Plugin
+	anonymizeRegexp *regexp.Regexp
 
 	ctx context.Context
 }
@@ -204,6 +206,7 @@ func New(ctx context.Context, config *config.Config) (*Botex, error) {
 		resources:         resources,
 		natsSubscriptions: make([]*nats.Subscription, 0),
 		plugins:           make([]Plugin, 0),
+		anonymizeRegexp:   regexp.MustCompile(`([^\/=\?&\.])`),
 		ctx:               ctx,
 	}
 

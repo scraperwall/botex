@@ -3,6 +3,7 @@ package botex
 import (
 	"bufio"
 	"io"
+	"net/url"
 	"os"
 	"regexp"
 	"strings"
@@ -14,8 +15,7 @@ import (
 )
 
 // LogReplay replays a log file into the application
-func (b *Botex) LogReplay(logfile, format string) {
-
+func (b *Botex) LogReplay(logfile, format string, anonymize bool) {
 	fh, err := os.Open(logfile)
 	if err != nil {
 		log.Fatalf("%s: %s", logfile, err)
@@ -94,11 +94,21 @@ func (b *Botex) LogReplay(logfile, format string) {
 			continue
 		}
 
+		reqURL := reqData[2]
+		if anonymize {
+			reqURL = b.anonymizeURL(reqURL)
+		}
+
+		host, err := logEntry.Field("host")
+		if err != nil || host == "" || anonymize {
+			host = "scw.test"
+		}
+
 		request := data.Request{
 			Source:    remote,
 			Timestamp: tStart.UnixNano(),
-			URL:       reqData[2],
-			Host:      "scw.test",
+			URL:       reqURL,
+			Host:      host,
 			Method:    reqData[1],
 		}
 
@@ -166,11 +176,21 @@ func (b *Botex) LogReplay(logfile, format string) {
 				continue
 			}
 
+			reqURL := reqData[2]
+			if anonymize {
+				reqURL = b.anonymizeURL(reqURL)
+			}
+
+			host, err := logEntry.Field("host")
+			if err != nil || host == "" || anonymize {
+				host = "scw.test"
+			}
+
 			request := data.Request{
 				Source:    remote,
 				Timestamp: time.Now().UnixNano(),
-				URL:       reqData[2],
-				Host:      "scw.test",
+				URL:       reqURL,
+				Host:      host,
 				Method:    reqData[1],
 			}
 
@@ -181,4 +201,25 @@ func (b *Botex) LogReplay(logfile, format string) {
 			time.Sleep(timePerLine)
 		}
 	}
+}
+
+func (b *Botex) anonymizeURL(in string) string {
+	uri, err := url.Parse(in)
+	if err != nil {
+		log.Fatalf("%s: %s\n", uri, err)
+	}
+
+	dotIdx := strings.LastIndex(uri.Path, ".")
+	path := ""
+	if dotIdx > -1 {
+		path = b.anonymizeRegexp.ReplaceAllString(uri.Path[0:dotIdx], "x") + "." + uri.Path[dotIdx+1:]
+	} else {
+		path = b.anonymizeRegexp.ReplaceAllString(uri.Path, "x")
+	}
+
+	if len(uri.RawQuery) > 0 {
+		path = path + "?" + b.anonymizeRegexp.ReplaceAllString(uri.RawQuery, "x")
+	}
+
+	return path
 }

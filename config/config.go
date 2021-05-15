@@ -32,6 +32,7 @@ type Config struct {
 	MaxAppRequests   int
 	LogReplay        string
 	LogFormat        string
+	LogAnonymize     bool
 	APIAddress       string
 	LogMemoryStats   bool
 	WhitelistTOML    string
