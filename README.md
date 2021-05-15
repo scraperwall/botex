@@ -283,3 +283,8 @@ All available information about a single IP address can be retrieved, too:
 
 There is a web GUI available at [github.com/scraperwall/botex-admin](https://github.com/scraperwall/botex-admin)
 
+## License
+
+License
+
+Unless otherwise noted, the botex source files are distributed under the GNU AGPLv3 license found in the LICENSE file.
