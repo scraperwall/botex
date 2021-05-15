@@ -17,13 +17,15 @@ Binary releases are available for Linux, OS X and Windows.
 
 ## Analyze a log file
 
-If you only want to check if your website has a bad bot problem you can replay a single log file. For this to work, botex needs to know the format of the log file and its location.
+If you only want to check if your website has a bad bot problem you can replay a single log file. For this to work, botex needs to know the format of the log file and its location. 
 
 	$ botex \
 	    -log-replay /var/log/nginx/access.log.0 \
 	    -log-format '$remote_addr - $remote_user [$time_local] "$request" $status $body_bytes_sent "$http_referer" "$http_user_agent"'
 
 botex uses [nginx variable names](http://nginx.org/en/docs/varindex.html). It needs *\$remote_addr*, *\$time_local* and *\$request* as a bare minimum to analyze a log file. Make sure you use these names even if you analyze a log file from a different server such as Apache.
+
+botex loads the log file so that its entire content fits into the time frame you've set it to observe.
 
 ### Time Frame
 
@@ -91,19 +93,19 @@ thus the corresponding log file format specification for botex is
 and in order to analyze the log file you would start botex with the following parameters:
 
 	$ botex \
-		-log-replay=/var/log/nginx/access.log.0 \
-		-log-format '$remote_addr - $remote_user [$time_local] "$request" $status $body_bytes_sent "$http_referer" "$http_user_agent" "$none"' \
-        -resolver-workers 50 \
-        -dns-server 192.168.1.1:53 \
-        -asndb-file ./GeoLite2-ASN-CSV_20210511.zip \
-	    -geoipdb-file ./GeoLite2-City_20210511.tar.gz
-        -window-size 1m \
-        -keep-requests 500 \
-        -num-windows 60 \
-        -max-app-requests 150 \
-        -max-ratio 0.91  \
-        -networks \
-        -clear-blocked
+	   -log-replay=/var/log/nginx/access.log.0 \
+	   -log-format '$remote_addr - $remote_user [$time_local] "$request" $status $body_bytes_sent "$http_referer" "$http_user_agent" "$none"' \
+           -resolver-workers 50 \
+           -dns-server 192.168.1.1:53 \
+           -asndb-file ./GeoLite2-ASN-CSV_20210511.zip \
+	   -geoipdb-file ./GeoLite2-City_20210511.tar.gz \
+           -window-size 1m \
+           -keep-requests 500 \
+           -num-windows 60 \
+           -max-app-requests 150 \
+           -max-ratio 0.91  \
+           -networks \
+           -clear-blocked
 
 
 *-clear-blocked* clears all blocked IPs from the database when it starts.
