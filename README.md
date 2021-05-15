@@ -5,7 +5,6 @@ Botex is an open source bad bot management tool from [ScraperWall](https://scrap
 It can be integrated into Apache, Nginx, Varnish or third party WAFs such as Cloudflare or simply be used to analyze your website traffic in real time as a first step to evaluate whether integrating it into the web stack completely makes sense.
 
 
-
 ## Installation
 
 If you've got the Go toolchain installed, botex can easily be installed by go
@@ -142,11 +141,11 @@ With ***Useragent*** you can whitelist clients by their user agent. This should 
 
 ### Complete Example
 
-The log file contains log entries that are formatted like this:
+Suppose your log file contains log entries that are formatted as follows
 
 	94.134.88.168 - - [31/Mar/2020:10:00:00 +0200] "GET / HTTP/1.1" 200 12573 "https://scraperwall.com/" "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/85.0.4183.83 Safari/537.36"
 
-thus the corresponding log file format specification for botex is
+the corresponding log file format specification for botex is
 
 	'$remote_addr - $remote_user [$time_local] "$request" $status $body_bytes_sent "$http_referer" "$http_user_agent"'
 
@@ -169,7 +168,7 @@ and in order to analyze the log file you would start botex with the following pa
            -clear-blocked
 
 
-*-clear-blocked* clears all blocked IPs from the database when it starts.
+*-clear-blocked* makes botex clear all blocked IPs from the database when it starts.
 
 ## API
 
