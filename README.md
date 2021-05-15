@@ -82,7 +82,7 @@ lets botex keep the 100 latest requests per IP address.
 
 ## Whitelisting
 
-There are guaranteed to be IP addresses which you don't want blocked no matter what. Those IPs can be whitelisted in a TOML file using a wide range of filters. 
+There are guaranteed to be IP addresses which you don't want blocked no matter what. Those IPs can be whitelisted by a TOML file using a wide range of filters. 
 
 	[[ClientHost]]
 	Pattern = ".+\\.googlebot\\.com"
@@ -113,7 +113,7 @@ There are guaranteed to be IP addresses which you don't want blocked no matter w
 	Description = "Checkout Process"
 
 	[[Useragent]]
-	Pattern = "mymonitor/1\..+ (136228b8b06f9296)"
+	Pattern = "mymonitor/1\\..+ (136228b8b06f9296)"
 	Description = "Internal Monitor"
 
 All Patterns except for ASN and CIDR are evaluated as regular expressions. Backslashes (\\) need to be escaped as demonstrated above.
