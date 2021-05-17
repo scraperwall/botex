@@ -122,7 +122,6 @@ func (s *StatsWindows) Add(d Decision, t time.Time) error {
 
 	stats.UpdatedAt = time.Now()
 
-	// log.Infof("stats size: %d", binary.Size(stats))
 	s.Map.Put(time.Time(k), stats)
 
 	return nil

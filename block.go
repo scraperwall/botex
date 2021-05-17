@@ -292,7 +292,6 @@ func (b *Block) BlockASN(msg data.BlockMessage) error {
 	if err != nil {
 		return err
 	}
-	// b.blockASNNetworkChan <- true
 
 	return nil
 }

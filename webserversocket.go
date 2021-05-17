@@ -1,6 +1,6 @@
 /*
-	botex - a bad bot mitigation tool by ScraperWall
-	Copyright (C) 2021 ScraperWall, Tobias von Dewitz <tobias@scraperwall.com>
+botex - a bad bot mitigation tool by ScraperWall
+Copyright (C) 2021 ScraperWall, Tobias von Dewitz <tobias@scraperwall.com>
 
 	This program is free software: you can redistribute it and/or modify it
 	under the terms of the GNU Affero General Public License as published by
@@ -237,7 +237,6 @@ func (wss *WebserverSocket) lookup(ip net.IP, decChan chan string) {
 }
 
 func (wss *WebserverSocket) hasValidCaptchaCookie(cookies string, ips []net.IP) bool {
-	// log.Printf("cookies: %s\n", cookies)
 	for _, cookie := range strings.Split(cookies, ";") {
 		cookie = strings.TrimSpace(cookie)
 

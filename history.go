@@ -76,7 +76,6 @@ func NewHistory(ctx context.Context, plugins []Plugin, resources *Resources, con
 			case <-ticker.C:
 				h.expire()
 			case stats := <-h.ipUpdateChan:
-				// log.Infof("received IPStats for %s - total: %d, app: %d, other: %d, ratio: %.2f", stats.IP, stats.Total, stats.App, stats.Other, stats.Ratio)
 				h.update(false, stats)
 			}
 		}

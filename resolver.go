@@ -36,8 +36,6 @@ const DNSLookupError = "lookup error"
 const reverseLookupQueue = "reverse"
 const resolveTopic = "resolv"
 
-// const resolveNamespace = "rl"
-
 // Resolver is a DNS resolver with Redis cache
 type Resolver struct {
 	config          *config.Config
@@ -189,7 +187,6 @@ func (r *Resolver) reverseLookup(rip *IPResolv) {
 	} else {
 		// an error occured while retrieving the hostname from the cache: try again
 		log.Tracef("serious badger lookup error: %s", err)
-		// rip.Err = err.Error()
 		r.Resolve(rip)
 		return
 	}
@@ -213,7 +210,6 @@ func (r *Resolver) reverseDNSLookup(ip net.IP) (string, error) {
 	}
 
 	dnsClient := new(dns.Client)
-	// dnsClient.Timeout = 2500 * time.Millisecond
 
 	p := new(dns.Msg)
 	p.Id = dns.Id()

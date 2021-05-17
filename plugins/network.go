@@ -419,7 +419,6 @@ func (n *Networks) Averages() data.NetworkStats {
 		if nd.NumberOfIPs() > 0 {
 			ratio := (float64(nd.Total) / float64(nd.NumberOfIPs()))
 			res.NetworkRatio += ratio
-			// log.Infof("network %s (%s) - ratio: %f, IPs: %d, app: %d", nd.ASN.Network, nd.ASN.Organization, ratio, nd.NumberOfIPs(), nd.Total)
 			ncount++
 		}
 		count++
