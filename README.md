@@ -11,7 +11,7 @@ If you've got the Go toolchain installed, botex can easily be installed by go
 
     $ go get github.com/scraperwall/botex/cmd/botex
 
-Binary releases are available for Linux, OS X and Windows.
+Binary releases are available for Linux and Mac OS X.
 
 
 ## Analyze a log file
